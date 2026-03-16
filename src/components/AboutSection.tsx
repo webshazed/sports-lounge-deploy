@@ -15,7 +15,7 @@ const AboutSection = () => {
           >
             <p className="section-label section-label-with-lines justify-start mb-4">About</p>
 
-            <h2 className="font-display text-4xl md:text-5xl font-bold text-foreground mb-8">
+            <h2 className="font-body text-4xl md:text-5xl font-bold text-foreground mb-8">
               More Than a Club
             </h2>
 

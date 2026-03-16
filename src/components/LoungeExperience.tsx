@@ -23,7 +23,7 @@ const LoungeExperience = () => {
           className="text-center mb-12"
         >
           <p className="section-label section-label-with-lines mb-4">The Experience</p>
-          <h2 className="font-display text-4xl font-bold text-foreground mb-6">
+          <h2 className="font-body text-4xl font-bold text-foreground mb-6">
             The Lounge Experience
           </h2>
         </motion.div>

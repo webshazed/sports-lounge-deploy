@@ -37,7 +37,7 @@ const Footer = () => {
 
           {/* Company Info */}
           <div>
-            <h4 className="font-semibold text-foreground mb-4 text-sm tracking-wider uppercase">Registered Office</h4>
+            <h4 className="font-body font-semibold text-foreground mb-4 text-sm tracking-wider uppercase">Registered Office</h4>
             <address className="text-sm text-muted-foreground not-italic leading-relaxed">
               Sports Lounge Global Ltd<br />
               Watergate Building, Crane Wharf<br />
