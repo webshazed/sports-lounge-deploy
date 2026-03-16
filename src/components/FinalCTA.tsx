@@ -18,14 +18,14 @@ const FinalCTA = () => {
           transition={{ duration: 0.7, ease: [0.19, 1, 0.22, 1] }}
           className="max-w-2xl mx-auto"
         >
-          <h2 className="font-display text-4xl md:text-5xl font-bold text-foreground mb-6">
+          <h2 className="font-body text-4xl md:text-5xl font-bold text-foreground mb-6">
             Ready to Join the Club?
           </h2>
           <p className="text-muted-foreground leading-relaxed mb-10">
             Become part of the Sports Lounge community and connect with professionals who share
             your passion for sport and success.
           </p>
-          <a href="#membership" className="btn-primary">
+          <a href="/register" className="btn-primary">
             Become a Member
           </a>
         </motion.div>

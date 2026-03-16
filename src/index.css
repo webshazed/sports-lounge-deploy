@@ -18,8 +18,8 @@
     --primary: 35 80% 50%;
     --primary-foreground: 20 10% 8%;
 
-    --secondary: 220 40% 25%;
-    --secondary-foreground: 0 0% 95%;
+    --secondary: 220 30% 35%;
+    --secondary-foreground: 0 0% 98%;
 
     --muted: 20 5% 18%;
     --muted-foreground: 20 5% 60%;
@@ -85,9 +85,9 @@
   }
 
   .btn-primary {
-    @apply bg-primary text-primary-foreground px-8 py-3 font-semibold text-sm tracking-wide
-           rounded-sm transition-all duration-200 hover:brightness-110 hover:shadow-lg
-           hover:shadow-primary/20;
+    @apply bg-secondary text-secondary-foreground px-8 py-3 font-semibold text-sm tracking-wide
+           rounded-md transition-all duration-200 hover:brightness-125 hover:shadow-lg
+           hover:shadow-secondary/30;
   }
 
   .btn-secondary {

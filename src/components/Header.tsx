@@ -4,7 +4,14 @@ import { Search, Menu, X } from "lucide-react";
 const Header = () => {
   const [mobileOpen, setMobileOpen] = useState(false);
 
-  const navLinks = ["Home", "About", "Membership", "Events", "Partners", "Contact"];
+  const navLinks = [
+    { label: "Home", href: "/" },
+    { label: "About", href: "/#about" },
+    { label: "Membership", href: "/#membership" },
+    { label: "Events", href: "/#events" },
+    { label: "Partners", href: "/partners" },
+    { label: "Contact", href: "/contact" },
+  ];
 
   return (
     <header className="fixed top-0 left-0 right-0 z-50 bg-background/95 backdrop-blur-sm border-b border-border">
@@ -21,11 +28,11 @@ const Header = () => {
         <nav className="hidden lg:flex items-center gap-8">
           {navLinks.map((link) => (
             <a
-              key={link}
-              href={`#${link.toLowerCase()}`}
+              key={link.label}
+              href={link.href}
               className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
             >
-              {link}
+              {link.label}
             </a>
           ))}
         </nav>
@@ -38,7 +45,7 @@ const Header = () => {
           <a href="#" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">
             Sign In
           </a>
-          <a href="#membership" className="btn-primary text-xs py-2 px-5">
+          <a href="/register" className="btn-primary text-xs py-2 px-5">
             Become a Member
           </a>
         </div>
@@ -58,17 +65,17 @@ const Header = () => {
           <nav className="container mx-auto px-6 py-4 flex flex-col gap-3">
             {navLinks.map((link) => (
               <a
-                key={link}
-                href={`#${link.toLowerCase()}`}
+                key={link.label}
+                href={link.href}
                 className="text-sm font-medium text-muted-foreground hover:text-foreground py-2"
                 onClick={() => setMobileOpen(false)}
               >
-                {link}
+                {link.label}
               </a>
             ))}
             <div className="pt-3 border-t border-border flex flex-col gap-3">
               <a href="#" className="text-sm font-medium text-muted-foreground">Sign In</a>
-              <a href="#membership" className="btn-primary text-center text-xs py-2">Become a Member</a>
+              <a href="/register" className="btn-primary text-center text-xs py-2">Become a Member</a>
             </div>
           </nav>
         </div>

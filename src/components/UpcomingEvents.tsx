@@ -40,7 +40,7 @@ const UpcomingEvents = () => {
           className="text-center mb-16"
         >
           <p className="section-label section-label-with-lines mb-4">What{"'"}s On</p>
-          <h2 className="font-display text-4xl font-bold text-foreground">Upcoming Events</h2>
+          <h2 className="font-body text-4xl font-bold text-foreground">Upcoming Events</h2>
         </motion.div>
 
         <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-12">

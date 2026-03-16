@@ -12,7 +12,7 @@ const SportsGroupSection = () => {
             transition={{ duration: 0.6 }}
           >
             <p className="section-label section-label-with-lines mb-4">Network</p>
-            <h2 className="font-display text-4xl font-bold text-foreground mb-6">
+            <h2 className="font-body text-4xl font-bold text-foreground mb-6">
               Part of the Sports Group Network
             </h2>
             <p className="text-muted-foreground leading-relaxed">

@@ -31,7 +31,7 @@ const HeroSection = () => {
           </p>
 
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
-            <a href="#membership" className="btn-primary">
+            <a href="/register" className="btn-primary">
               Become a Member
             </a>
             <a href="#about" className="btn-secondary">
