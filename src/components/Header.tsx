@@ -4,7 +4,14 @@ import { Search, Menu, X } from "lucide-react";
 const Header = () => {
   const [mobileOpen, setMobileOpen] = useState(false);
 
-  const navLinks = ["Home", "About", "Membership", "Events", "Partners", "Contact"];
+  const navLinks = [
+    { label: "Home", href: "/" },
+    { label: "About", href: "/#about" },
+    { label: "Membership", href: "/#membership" },
+    { label: "Events", href: "/#events" },
+    { label: "Partners", href: "/partners" },
+    { label: "Contact", href: "/contact" },
+  ];
 
   return (
     <header className="fixed top-0 left-0 right-0 z-50 bg-background/95 backdrop-blur-sm border-b border-border">
