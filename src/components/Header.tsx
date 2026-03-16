@@ -68,7 +68,7 @@ const Header = () => {
             ))}
             <div className="pt-3 border-t border-border flex flex-col gap-3">
               <a href="#" className="text-sm font-medium text-muted-foreground">Sign In</a>
-              <a href="#membership" className="btn-primary text-center text-xs py-2">Become a Member</a>
+              <a href="/register" className="btn-primary text-center text-xs py-2">Become a Member</a>
             </div>
           </nav>
         </div>

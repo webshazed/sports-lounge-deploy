@@ -23,7 +23,7 @@ const MembershipSection = () => {
               Members receive exclusive invitations, networking access, and entry to our private
               lounge events.
             </p>
-            <a href="#" className="btn-primary">
+            <a href="/register" className="btn-primary">
               Apply for Membership
             </a>
           </motion.div>

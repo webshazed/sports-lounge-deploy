@@ -25,7 +25,7 @@ const FinalCTA = () => {
             Become part of the Sports Lounge community and connect with professionals who share
             your passion for sport and success.
           </p>
-          <a href="#membership" className="btn-primary">
+          <a href="/register" className="btn-primary">
             Become a Member
           </a>
         </motion.div>
