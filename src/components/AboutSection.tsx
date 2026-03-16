@@ -1,5 +1,4 @@
 import { motion } from "framer-motion";
-import aboutImg from "@/assets/about-networking.jpg";
 
 const AboutSection = () => {
   return (
@@ -43,7 +42,7 @@ const AboutSection = () => {
             transition={{ duration: 0.7, ease: [0.19, 1, 0.22, 1], delay: 0.1 }}
           >
             <img
-              src={aboutImg}
+              src="/Image 1.jpeg"
               alt="Members networking at Sports Lounge"
               className="w-full h-[400px] object-cover rounded-sm"
             />
