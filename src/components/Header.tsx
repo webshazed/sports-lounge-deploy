@@ -38,7 +38,7 @@ const Header = () => {
           <a href="#" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">
             Sign In
           </a>
-          <a href="#membership" className="btn-primary text-xs py-2 px-5">
+          <a href="/register" className="btn-primary text-xs py-2 px-5">
             Become a Member
           </a>
         </div>
