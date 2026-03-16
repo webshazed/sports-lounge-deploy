@@ -65,12 +65,12 @@ const Header = () => {
           <nav className="container mx-auto px-6 py-4 flex flex-col gap-3">
             {navLinks.map((link) => (
               <a
-                key={link}
-                href={`#${link.toLowerCase()}`}
+                key={link.label}
+                href={link.href}
                 className="text-sm font-medium text-muted-foreground hover:text-foreground py-2"
                 onClick={() => setMobileOpen(false)}
               >
-                {link}
+                {link.label}
               </a>
             ))}
             <div className="pt-3 border-t border-border flex flex-col gap-3">
