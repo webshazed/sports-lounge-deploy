@@ -85,9 +85,9 @@
   }
 
   .btn-primary {
-    @apply bg-primary text-primary-foreground px-8 py-3 font-semibold text-sm tracking-wide
-           rounded-sm transition-all duration-200 hover:brightness-110 hover:shadow-lg
-           hover:shadow-primary/20;
+    @apply bg-secondary text-secondary-foreground px-8 py-3 font-semibold text-sm tracking-wide
+           rounded-md transition-all duration-200 hover:brightness-125 hover:shadow-lg
+           hover:shadow-secondary/30;
   }
 
   .btn-secondary {
