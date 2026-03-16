@@ -36,19 +36,26 @@ const CheckboxGroup = ({
 }: {
   label: string; options: string[]; selected: string[]; onChange: (v: string[]) => void;
 }) => (
-  <div>
-    <label className={labelClass}>{label}</label>
-    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+  <div className="bg-card border border-border p-6 rounded-md">
+    <label className="block text-sm font-medium text-foreground mb-4">{label}</label>
+    <div className="flex flex-wrap gap-2.5">
       {options.map((o) => (
-        <label key={o} className={checkboxWrap}>
+        <label 
+          key={o} 
+          className={`cursor-pointer px-4 pt-1.5 pb-2 rounded-full border text-sm font-medium transition-colors ${
+            selected.includes(o)
+              ? "bg-slate-800 border-slate-800 text-white"
+              : "bg-white border-slate-200 text-slate-700 hover:border-slate-300 hover:bg-slate-50"
+          }`}
+        >
           <input
             type="checkbox"
+            className="sr-only"
             checked={selected.includes(o)}
             onChange={(e) => {
               if (e.target.checked) onChange([...selected, o]);
               else onChange(selected.filter((s) => s !== o));
             }}
-            className="rounded border-border text-primary focus:ring-primary"
           />
           {o}
         </label>
@@ -92,7 +99,7 @@ const Register = () => {
   return (
     <div className="min-h-screen bg-background">
       <Header />
-      <section className="pt-32 pb-24">
+      <section className="py-16 md:py-24">
         <div className="container mx-auto px-6 max-w-2xl">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
@@ -113,10 +120,10 @@ const Register = () => {
               <button
                 key={t}
                 onClick={() => { setRegType(t); setMembershipType(""); }}
-                className={`px-6 py-3 rounded-md text-sm font-semibold transition-all ${
+                className={`px-8 py-3 rounded border shadow-sm text-sm font-semibold tracking-wide transition-all duration-200 ${
                   regType === t
-                    ? "bg-secondary text-secondary-foreground"
-                    : "bg-card border border-border text-muted-foreground hover:text-foreground"
+                    ? "bg-gradient-to-b from-[#3b5998] to-[#1e346b] border-[#1e346b] text-white hover:brightness-110 active:brightness-95"
+                    : "bg-gradient-to-b from-[#333333] to-[#1a1a1a] border-[#111111] text-white hover:brightness-110 active:brightness-95"
                 }`}
               >
                 {t === "individual" ? "Individual Registration" : "Business Registration"}

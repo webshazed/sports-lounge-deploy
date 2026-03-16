@@ -85,15 +85,15 @@
   }
 
   .btn-primary {
-    @apply bg-secondary text-secondary-foreground px-8 py-3 font-semibold text-sm tracking-wide
-           rounded-md transition-all duration-200 hover:brightness-125 hover:shadow-lg
-           hover:shadow-secondary/30;
+    @apply bg-gradient-to-b from-[#3b5998] to-[#1e346b] text-white px-8 py-3 font-semibold text-sm tracking-wide
+           rounded-md border border-[#1e346b] shadow-sm transition-all duration-200 
+           hover:brightness-110 active:brightness-95;
   }
 
   .btn-secondary {
-    @apply bg-muted/60 text-foreground px-8 py-3 font-semibold text-sm tracking-wide
-           border border-border rounded-sm transition-all duration-200
-           hover:bg-muted hover:border-primary/30;
+    @apply bg-gradient-to-b from-[#333333] to-[#1a1a1a] text-white px-8 py-3 font-semibold text-sm tracking-wide
+           border border-[#111111] rounded-md shadow-sm transition-all duration-200
+           hover:brightness-110 active:brightness-95;
   }
 
   .benefit-card {

@@ -14,14 +14,11 @@ const Header = () => {
   ];
 
   return (
-    <header className="fixed top-0 left-0 right-0 z-50 bg-background/95 backdrop-blur-sm border-b border-border">
+    <header className="bg-white border-b border-border shadow-sm">
       <div className="container mx-auto px-6 flex items-center justify-between h-16">
         {/* Logo */}
-        <a href="#" className="flex items-center gap-2">
-          <span className="font-display text-xl font-bold tracking-tight text-foreground">
-            SP<span className="text-primary">⚽</span>RTS
-          </span>
-          <span className="font-display text-xl font-bold tracking-tight text-foreground">LOUNGE</span>
+        <a href="/" className="flex items-center">
+          <img src="/Logo-1.png" alt="Sports Lounge" className="h-10 w-auto" />
         </a>
 
         {/* Desktop Nav */}
@@ -30,7 +27,7 @@ const Header = () => {
             <a
               key={link.label}
               href={link.href}
-              className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+              className="text-sm font-medium text-slate-700 hover:text-slate-900 transition-colors"
             >
               {link.label}
             </a>
@@ -39,10 +36,10 @@ const Header = () => {
 
         {/* Right side */}
         <div className="hidden lg:flex items-center gap-4">
-          <button className="text-muted-foreground hover:text-foreground transition-colors">
+          <button className="text-slate-700 hover:text-slate-900 transition-colors">
             <Search size={18} />
           </button>
-          <a href="#" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">
+          <a href="#" className="text-sm font-medium text-slate-700 hover:text-slate-900 transition-colors">
             Sign In
           </a>
           <a href="/register" className="btn-primary text-xs py-2 px-5">
@@ -52,7 +49,7 @@ const Header = () => {
 
         {/* Mobile toggle */}
         <button
-          className="lg:hidden text-foreground"
+          className="lg:hidden text-slate-900"
           onClick={() => setMobileOpen(!mobileOpen)}
         >
           {mobileOpen ? <X size={24} /> : <Menu size={24} />}
@@ -61,20 +58,20 @@ const Header = () => {
 
       {/* Mobile menu */}
       {mobileOpen && (
-        <div className="lg:hidden bg-background border-t border-border">
+        <div className="lg:hidden bg-white border-t border-border shadow-md">
           <nav className="container mx-auto px-6 py-4 flex flex-col gap-3">
             {navLinks.map((link) => (
               <a
                 key={link.label}
                 href={link.href}
-                className="text-sm font-medium text-muted-foreground hover:text-foreground py-2"
+                className="text-sm font-medium text-slate-700 hover:text-slate-900 py-2"
                 onClick={() => setMobileOpen(false)}
               >
                 {link.label}
               </a>
             ))}
             <div className="pt-3 border-t border-border flex flex-col gap-3">
-              <a href="#" className="text-sm font-medium text-muted-foreground">Sign In</a>
+              <a href="#" className="text-sm font-medium text-slate-700">Sign In</a>
               <a href="/register" className="btn-primary text-center text-xs py-2">Become a Member</a>
             </div>
           </nav>

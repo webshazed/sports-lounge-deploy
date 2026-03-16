@@ -9,9 +9,7 @@ const Footer = () => {
         <div className="grid md:grid-cols-3 gap-12">
           {/* Brand */}
           <div>
-            <span className="font-display text-xl font-bold text-foreground block mb-4">
-              SP<span className="text-primary">⚽</span>RTS LOUNGE
-            </span>
+            <img src="/Footer%20Logo.jpg" alt="Sports Lounge" className="h-24 w-auto mb-4 rounded-md object-contain" />
             <p className="text-sm text-muted-foreground leading-relaxed">
               A private members club for professionals who share a passion for sport, opportunity,
               and connections.
