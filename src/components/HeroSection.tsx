@@ -31,7 +31,7 @@ const HeroSection = () => {
 
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
             <a href="/register" className="btn-primary">
-              Become a Member
+              Apply for Membership
             </a>
             <a href="#about" className="btn-secondary">
               Explore the Club

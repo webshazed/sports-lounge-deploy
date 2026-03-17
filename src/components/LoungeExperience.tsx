@@ -56,6 +56,75 @@ const LoungeExperience = () => {
             Host meetings, relax with friends, or enjoy live sporting moments with fellow members.
           </p>
         </div>
+
+        {/* Community */}
+        <div className="max-w-3xl mx-auto mt-16">
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.6 }}
+            className="text-center"
+          >
+            <p className="section-label section-label-with-lines mb-4">The Community</p>
+            <h3 className="font-body text-3xl md:text-4xl font-bold text-foreground mb-6">
+              A Community of Ambitious People
+            </h3>
+
+            <div className="space-y-4 text-muted-foreground leading-relaxed">
+              <p>
+                Sports Lounge brings together professionals, entrepreneurs, athletes and decision makers who share a
+                passion for sport and business.
+              </p>
+              <p>
+                Our members connect through events, conversations and opportunities that simply don’t happen anywhere
+                else.
+              </p>
+              <p>
+                Once you become a member, you also gain access to the{" "}
+                <span className="font-semibold text-foreground">Sports Lounge online community</span> — a private digital
+                platform where members and professional sportspeople can connect, chat, share ideas and build
+                relationships.
+              </p>
+              <p>
+                Think of it as a{" "}
+                <span className="font-semibold text-foreground">private social network for sport and business</span>,
+                where members can message each other, post updates, and collaborate within the Sports Lounge community.
+              </p>
+              <p>
+                From casual conversations over live sport to strategic partnerships, Sports Lounge is where
+                relationships are built.
+              </p>
+            </div>
+          </motion.div>
+
+          <div className="mt-10 grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="rounded-sm border border-border/60 bg-background/40 px-5 py-4 text-left">
+              <div className="text-lg font-semibold text-foreground">👥 Members Network</div>
+              <div className="mt-1 text-sm text-muted-foreground">
+                Connect with vetted members across sport and business.
+              </div>
+            </div>
+            <div className="rounded-sm border border-border/60 bg-background/40 px-5 py-4 text-left">
+              <div className="text-lg font-semibold text-foreground">💬 Private Messaging</div>
+              <div className="mt-1 text-sm text-muted-foreground">
+                Start conversations and build relationships directly.
+              </div>
+            </div>
+            <div className="rounded-sm border border-border/60 bg-background/40 px-5 py-4 text-left">
+              <div className="text-lg font-semibold text-foreground">📢 Member Updates</div>
+              <div className="mt-1 text-sm text-muted-foreground">
+                Share updates, ideas, and opportunities with the community.
+              </div>
+            </div>
+            <div className="rounded-sm border border-border/60 bg-background/40 px-5 py-4 text-left">
+              <div className="text-lg font-semibold text-foreground">🤝 Business Connections</div>
+              <div className="mt-1 text-sm text-muted-foreground">
+                Turn introductions into partnerships and outcomes.
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </section>
   );
