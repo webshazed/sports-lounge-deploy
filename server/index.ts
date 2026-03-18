@@ -1,11 +1,16 @@
 import "dotenv/config";
 import express from "express";
-import { registerUser, signInUser } from "../api/_lib/auth";
-import { ensureSchema, getPool } from "../api/_lib/db";
-import { getSessionFromAuthHeader } from "../api/_lib/session";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { registerUser, signInUser } from "../api/_lib/auth.js";
+import { ensureSchema, getPool } from "../api/_lib/db.js";
+import { getSessionFromAuthHeader } from "../api/_lib/session.js";
 import { PutObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import { buildPublicUrl, getBucket, getR2Client } from "../api/_lib/r2";
+import { buildPublicUrl, getBucket, getR2Client } from "../api/_lib/r2.js";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 app.use(express.json());
@@ -1225,8 +1230,7 @@ app.get("/api/connect", async (req, res) => {
       pendingOutgoing: pendingOutgoing.rows,
     });
   } catch (e) {
-    const msg = e instanceof Error ? e.message : "Error";
-    return res.status(500).json({ error: msg });
+    return res.status(500).json({ error: e instanceof Error ? e.message : "Error" });
   }
 });
 
@@ -1365,7 +1369,16 @@ app.post("/api/messages", async (req, res) => {
   }
 });
 
-const port = Number(process.env.API_PORT || 8787);
+// Serve static files from the Vite build
+app.use(express.static(path.join(__dirname, "../dist")));
+
+// SPA fallback: send index.html for any unknown routes (handling React Router)
+app.get("*", (req, res) => {
+  if (req.path.startsWith("/api")) return res.status(404).json({ error: "Not found" });
+  res.sendFile(path.join(__dirname, "../dist/index.html"));
+});
+
+const port = Number(process.env.PORT || process.env.API_PORT || 8787);
 app.listen(port, "0.0.0.0", () => {
-    console.log(`Server running at http://localhost:${port}`);
+    console.log(`Server running on port ${port}`);
 });
