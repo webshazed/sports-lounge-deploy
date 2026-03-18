@@ -1373,8 +1373,7 @@ app.post("/api/messages", async (req, res) => {
 app.use(express.static(path.join(__dirname, "../dist")));
 
 // SPA fallback: send index.html for any unknown routes (handling React Router)
-app.get("/:splat*", (req: express.Request, res: express.Response) => {
-  if (req.path.startsWith("/api")) return res.status(404).json({ error: "Not found" });
+app.get(/^(?!\/api).*/, (req: express.Request, res: express.Response) => {
   res.sendFile(path.join(__dirname, "../dist/index.html"));
 });
 
