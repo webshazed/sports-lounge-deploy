@@ -1,6 +1,11 @@
 {
   "version": 2,
+  "devCommand": "vite --port $PORT",
   "builds": [
+    {
+      "src": "api/**/*.ts",
+      "use": "@vercel/node"
+    },
     {
       "src": "package.json",
       "use": "@vercel/static-build",
@@ -12,6 +17,18 @@
   "routes": [
     {
       "handle": "filesystem"
+    },
+    {
+      "src": "/api/messages/(.*)",
+      "dest": "/api/messages.ts?u=$1"
+    },
+    {
+      "src": "/api/profile/(.*)",
+      "dest": "/api/members.ts?username=$1"
+    },
+    {
+      "src": "/api/(.*)",
+      "dest": "/api/$1.ts"
     },
     {
       "src": "/.*",

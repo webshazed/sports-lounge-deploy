@@ -2,6 +2,8 @@ import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 import { motion } from "framer-motion";
 import { useState } from "react";
+import { toast } from "sonner";
+import { useNavigate } from "react-router-dom";
 import { countries } from "@/data/countries";
 import {
   aboutYouOptions, individualMembershipTypes, businessMembershipTypes,
@@ -14,6 +16,32 @@ const inputClass =
   "w-full bg-card border border-border rounded-md px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary";
 const labelClass = "block text-sm font-medium text-foreground mb-2";
 const checkboxWrap = "flex items-center gap-2 text-sm text-muted-foreground";
+
+async function readJsonOrText<T>(res: Response): Promise<{ ok: true; json: T } | { ok: false; text: string }> {
+  const text = await res.text();
+  try {
+    return { ok: true, json: JSON.parse(text) as T };
+  } catch {
+    return { ok: false, text };
+  }
+}
+
+async function registerAccount(data: any) {
+  const res = await fetch("/api/register", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  const parsed = await readJsonOrText<{ user: { id: number; email: string; username: string } } | { error: string; details?: string }>(
+    res
+  );
+  if (parsed.ok === false) {
+    throw new Error(`Registration failed (${res.status}). ${parsed.text.slice(0, 200)}`);
+  }
+  const json = parsed.json;
+  if (!res.ok) throw new Error("error" in json ? json.error : "Registration failed");
+  return json as { user: { id: number; email: string; username: string } };
+}
 
 const SelectField = ({
   label, options, value, onChange, placeholder = "- Select -",
@@ -66,6 +94,8 @@ const CheckboxGroup = ({
 
 const Register = () => {
   const [regType, setRegType] = useState<RegType>("individual");
+  const [loading, setLoading] = useState(false);
+  const navigate = useNavigate();
 
   // Shared fields
   const [firstName, setFirstName] = useState("");
@@ -91,9 +121,34 @@ const Register = () => {
   const [bizType, setBizType] = useState("");
   const [bizName, setBizName] = useState("");
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    alert("Registration submitted! We'll review your application shortly.");
+    setLoading(true);
+    try {
+      await registerAccount({
+        email, username, password,
+        firstName, lastName, phone, dob, gender,
+        aboutYou: aboutYou,
+        favoriteSports: sports,
+        membershipType,
+        plTeam: plTeam,
+        worldTeam: worldTeam,
+        addressLine1: address1,
+        addressLine2: address2,
+        city,
+        zipCode: zip,
+        country,
+        bizType,
+        bizName,
+        regType
+      });
+      toast.success("Registration successful. You can now sign in.");
+      navigate("/signin", { state: { emailOrUsername: email || username } });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Registration failed");
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -216,7 +271,7 @@ const Register = () => {
             </div>
 
             <button type="submit" className="btn-primary w-full text-base py-4">
-              Sign Up
+              {loading ? "Submitting..." : "Sign Up"}
             </button>
           </motion.form>
         </div>
