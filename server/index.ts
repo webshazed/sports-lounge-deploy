@@ -15,7 +15,7 @@ const __dirname = path.dirname(__filename);
 const app = express();
 app.use(express.json());
 
-app.post("/api/register", async (req, res) => {
+app.post("/api/register", async (req: express.Request, res: express.Response) => {
   try {
     const { 
       email, username, password, 
@@ -85,7 +85,7 @@ app.post("/api/register", async (req, res) => {
   }
 });
 
-app.post("/api/signin", async (req, res) => {
+app.post("/api/signin", async (req: express.Request, res: express.Response) => {
   try {
     const { emailOrUsername, password } = req.body as {
       emailOrUsername?: string;
@@ -1373,7 +1373,7 @@ app.post("/api/messages", async (req, res) => {
 app.use(express.static(path.join(__dirname, "../dist")));
 
 // SPA fallback: send index.html for any unknown routes (handling React Router)
-app.get("(.*)", (req: express.Request, res: express.Response) => {
+app.get("/:splat*", (req: express.Request, res: express.Response) => {
   if (req.path.startsWith("/api")) return res.status(404).json({ error: "Not found" });
   res.sendFile(path.join(__dirname, "../dist/index.html"));
 });
