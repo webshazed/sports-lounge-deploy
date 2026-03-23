@@ -1435,7 +1435,7 @@ app.delete("/api/feed/:id", async (req, res) => {
   }
 });
 
-app.get("(.*)", (_req: express.Request, res: express.Response) => {
+app.get(/.*/, (_req: express.Request, res: express.Response) => {
   res.sendFile(path.join(__dirname, "../dist/index.html"));
 });
 
