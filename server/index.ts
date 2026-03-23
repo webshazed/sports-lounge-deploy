@@ -1,73 +1,26 @@
 import "dotenv/config";
 import express from "express";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-import { registerUser, signInUser } from "../api/_lib/auth.js";
-import { ensureSchema, getPool } from "../api/_lib/db.js";
-import { getSessionFromAuthHeader } from "../api/_lib/session.js";
+import { registerUser, signInUser } from "../api/_lib/auth";
+import { ensureSchema, getPool } from "../api/_lib/db";
+import { getSessionFromAuthHeader } from "../api/_lib/session";
 import { PutObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import { buildPublicUrl, getBucket, getR2Client } from "../api/_lib/r2.js";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+import { buildPublicUrl, getBucket, getR2Client } from "../api/_lib/r2";
 
 const app = express();
 app.use(express.json());
 
-app.post("/api/register", async (req: express.Request, res: express.Response) => {
+app.post("/api/register", async (req, res) => {
   try {
-    const { 
-      email, username, password, 
-      firstName, lastName, phone, dob, gender, aboutYou,
-      favoriteSports, membershipType, plTeam, worldTeam,
-      addressLine1, addressLine2, city, zipCode, country,
-      bizType, bizName, regType
-    } = req.body as {
+    const { email, username, password } = req.body as {
       email?: string;
       username?: string;
       password?: string;
-      firstName?: string;
-      lastName?: string;
-      phone?: string;
-      dob?: string;
-      gender?: string;
-      aboutYou?: string;
-      favoriteSports?: string | string[];
-      membershipType?: string;
-      plTeam?: string | string[];
-      worldTeam?: string | string[];
-      addressLine1?: string;
-      addressLine2?: string;
-      city?: string;
-      zipCode?: string;
-      country?: string;
-      bizType?: string;
-      bizName?: string;
-      regType?: string;
     };
     const result = await registerUser({
       email: email || "",
       username: username || "",
       password: password || "",
-      firstName,
-      lastName,
-      phone,
-      dob,
-      gender,
-      aboutYou,
-      favoriteSports,
-      membershipType,
-      plTeam,
-      worldTeam,
-      addressLine1,
-      addressLine2,
-      city,
-      zipCode,
-      country,
-      bizType,
-      bizName,
-      regType,
     });
     return res.status(201).json(result);
   } catch (e) {
@@ -85,7 +38,7 @@ app.post("/api/register", async (req: express.Request, res: express.Response) =>
   }
 });
 
-app.post("/api/signin", async (req: express.Request, res: express.Response) => {
+app.post("/api/signin", async (req, res) => {
   try {
     const { emailOrUsername, password } = req.body as {
       emailOrUsername?: string;
@@ -125,7 +78,7 @@ app.get("/api/me", async (req, res) => {
     if (!user) return res.status(401).json({ error: "Unauthorized" });
 
     const profileRes = await pool.query(
-      `select user_id, full_name, role, company, bio, industry, favorite_sports, business_interests, looking_for, badges, cover_image_url, avatar_url, membership_tier, location, phone, dob, gender, about_you, privacy_settings, updated_at
+      `select user_id, full_name, role, company, bio, industry, favorite_sports, business_interests, looking_for, badges, cover_image_url, avatar_url, membership_tier, location, updated_at
        from profiles where user_id = $1 limit 1`,
       [session.userId]
     );
@@ -149,11 +102,6 @@ app.get("/api/me", async (req, res) => {
             avatarUrl: p.avatar_url,
             membershipTier: p.membership_tier,
             location: p.location,
-            phone: p.phone,
-            dob: p.dob,
-            gender: p.gender,
-            aboutYou: p.about_you,
-            privacySettings: p.privacy_settings,
             updatedAt: p.updated_at,
           }
         : null,
@@ -174,6 +122,8 @@ async function upsertProfile(req: express.Request, res: express.Response) {
     const pool = getPool();
 
     const body = (req.body || {}) as {
+      username?: string;
+      email?: string;
       fullName?: string;
       role?: string;
       company?: string;
@@ -187,47 +137,64 @@ async function upsertProfile(req: express.Request, res: express.Response) {
       avatarUrl?: string;
       membershipTier?: string;
       location?: string;
-      phone?: string;
-      dob?: string;
-      gender?: string;
-      aboutYou?: string;
-      plTeam?: string;
-      worldTeam?: string;
-      addressLine1?: string;
-      addressLine2?: string;
-      city?: string;
-      zipCode?: string;
-      country?: string;
-      bizType?: string;
-      bizName?: string;
-      regType?: string;
-      privacySettings?: Record<string, string>;
     };
-    
-    // Fetch existing profile to merge
-    const existingRes = await pool.query("select * from profiles where user_id = $1", [session.userId]);
+
+    // Update users table first if username or email provided
+    if (body.username || body.email) {
+      // Check for uniqueness if changing
+      const uRes = await pool.query(`select email, username from users where id=$1`, [session.userId]);
+      const u = uRes.rows[0];
+      const newEmail = body.email ? body.email.trim().toLowerCase() : u.email;
+      const newUsername = body.username ? body.username.trim() : u.username;
+
+      if (newEmail !== u.email || newUsername !== u.username) {
+        try {
+          await pool.query(
+            `update users set email=$1, username=$2 where id=$3`,
+            [newEmail, newUsername, session.userId]
+          );
+        } catch (err: any) {
+          if (err.message?.toLowerCase().includes("duplicate key")) {
+            return res.status(409).json({ error: "Email or username already in use" });
+          }
+          throw err;
+        }
+      }
+    }
+
+    // Read existing profile to merge
+    const existingRes = await pool.query(`select * from profiles where user_id=$1`, [session.userId]);
     const existing = existingRes.rows[0] || {};
 
-    const merge = (key: string, bodyVal: any, existingVal: any) => {
-      if (bodyVal !== undefined) return bodyVal;
-      return existingVal !== undefined ? existingVal : null;
+    const merged = {
+      fullName: body.fullName !== undefined ? body.fullName : existing.full_name,
+      role: body.role !== undefined ? body.role : existing.role,
+      company: body.company !== undefined ? body.company : existing.company,
+      bio: body.bio !== undefined ? body.bio : existing.bio,
+      industry: body.industry !== undefined ? body.industry : existing.industry,
+      favoriteSports: body.favoriteSports !== undefined ? body.favoriteSports : existing.favorite_sports,
+      businessInterests: body.businessInterests !== undefined ? body.businessInterests : existing.business_interests,
+      lookingFor: body.lookingFor !== undefined ? body.lookingFor : (existing.looking_for || []),
+      badges: body.badges !== undefined ? body.badges : (existing.badges || []),
+      coverImageUrl: body.coverImageUrl !== undefined ? body.coverImageUrl : existing.cover_image_url,
+      avatarUrl: body.avatarUrl !== undefined ? body.avatarUrl : existing.avatar_url,
+      membershipTier: body.membershipTier !== undefined ? body.membershipTier : (existing.membership_tier || "Gold"),
+      location: body.location !== undefined ? body.location : existing.location,
     };
 
-    const membershipTier = (merge("membershipTier", body.membershipTier, existing.membership_tier) || "Gold").trim();
-    const lookingFor = Array.isArray(body.lookingFor) ? body.lookingFor : (existing.looking_for || []);
-    const badges = Array.isArray(body.badges) ? body.badges : (existing.badges || []);
-    
-    const defaultPrivacySettings = { phone: "only_me", email: "only_me", dob: "only_me", username: "only_me" };
-    const privacySettings = { 
-      ...defaultPrivacySettings, 
-      ...(existing.privacy_settings || {}),
-      ...(body.privacySettings || {}) 
-    };
+    // If favoriteSports or businessInterests are arrays (e.g. from registration), join them
+    let favSports = merged.favoriteSports;
+    if (Array.isArray(favSports)) favSports = favSports.join(", ");
+    let bizInt = merged.businessInterests;
+    if (Array.isArray(bizInt)) bizInt = bizInt.join(", ");
+
+    const lookingFor = Array.isArray(merged.lookingFor) ? merged.lookingFor : [];
+    const badges = Array.isArray(merged.badges) ? merged.badges : [];
 
     const upsert = await pool.query(
       `insert into profiles
-        (user_id, full_name, role, company, bio, industry, favorite_sports, business_interests, looking_for, badges, cover_image_url, avatar_url, membership_tier, location, phone, dob, gender, about_you, pl_team, world_team, address_line1, address_line2, city, zip_code, country, biz_type, biz_name, reg_type, privacy_settings, updated_at)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,now())
+        (user_id, full_name, role, company, bio, industry, favorite_sports, business_interests, looking_for, badges, cover_image_url, avatar_url, membership_tier, location, updated_at)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,now())
        on conflict (user_id) do update set
          full_name = excluded.full_name,
          role = excluded.role,
@@ -242,53 +209,23 @@ async function upsertProfile(req: express.Request, res: express.Response) {
          avatar_url = excluded.avatar_url,
          membership_tier = excluded.membership_tier,
          location = excluded.location,
-         phone = excluded.phone,
-         dob = excluded.dob,
-         gender = excluded.gender,
-         about_you = excluded.about_you,
-         pl_team = excluded.pl_team,
-         world_team = excluded.world_team,
-         address_line1 = excluded.address_line1,
-         address_line2 = excluded.address_line2,
-         city = excluded.city,
-         zip_code = excluded.zip_code,
-         country = excluded.country,
-         biz_type = excluded.biz_type,
-         biz_name = excluded.biz_name,
-         reg_type = excluded.reg_type,
-         privacy_settings = excluded.privacy_settings,
          updated_at = now()
-       returning *`,
+       returning user_id, full_name, role, company, bio, industry, favorite_sports, business_interests, looking_for, badges, cover_image_url, avatar_url, membership_tier, location, updated_at`,
       [
         session.userId,
-        merge("fullName", body.fullName, existing.full_name),
-        merge("role", body.role, existing.role),
-        merge("company", body.company, existing.company),
-        merge("bio", body.bio, existing.bio),
-        merge("industry", body.industry, existing.industry),
-        merge("favoriteSports", body.favoriteSports, existing.favorite_sports),
-        merge("businessInterests", body.businessInterests, existing.business_interests),
+        merged.fullName || null,
+        merged.role || null,
+        merged.company || null,
+        merged.bio || null,
+        merged.industry || null,
+        favSports || null,
+        bizInt || null,
         lookingFor,
         badges,
-        merge("coverImageUrl", body.coverImageUrl, existing.cover_image_url),
-        merge("avatarUrl", body.avatarUrl, existing.avatar_url),
-        membershipTier,
-        merge("location", body.location, existing.location),
-        merge("phone", body.phone, existing.phone),
-        merge("dob", body.dob, existing.dob),
-        merge("gender", body.gender, existing.gender),
-        merge("aboutYou", body.aboutYou, existing.about_you),
-        merge("plTeam", body.plTeam, existing.pl_team),
-        merge("worldTeam", body.worldTeam, existing.world_team),
-        merge("addressLine1", body.addressLine1, existing.address_line1),
-        merge("addressLine2", body.addressLine2, existing.address_line2),
-        merge("city", body.city, existing.city),
-        merge("zipCode", body.zipCode, existing.zip_code),
-        merge("country", body.country, existing.country),
-        merge("bizType", body.bizType, existing.biz_type),
-        merge("bizName", body.bizName, existing.biz_name),
-        merge("regType", body.regType, existing.reg_type),
-        privacySettings,
+        merged.coverImageUrl || null,
+        merged.avatarUrl || null,
+        merged.membershipTier,
+        merged.location || null,
       ]
     );
 
@@ -309,21 +246,6 @@ async function upsertProfile(req: express.Request, res: express.Response) {
         avatarUrl: p.avatar_url,
         membershipTier: p.membership_tier,
         location: p.location,
-        phone: p.phone,
-        dob: p.dob,
-        gender: p.gender,
-        aboutYou: p.about_you,
-        plTeam: p.pl_team,
-        worldTeam: p.world_team,
-        addressLine1: p.address_line1,
-        addressLine2: p.address_line2,
-        city: p.city,
-        zipCode: p.zip_code,
-        country: p.country,
-        bizType: p.biz_type,
-        bizName: p.biz_name,
-        regType: p.reg_type,
-        privacySettings: p.privacy_settings,
         updatedAt: p.updated_at,
       },
     });
@@ -340,79 +262,6 @@ async function upsertProfile(req: express.Request, res: express.Response) {
 app.put("/api/me/profile", upsertProfile);
 // Current frontend uses PUT /api/me
 app.put("/api/me", upsertProfile);
-
-app.get("/api/profile/:username", async (req, res) => {
-  try {
-    await ensureSchema();
-    const session = getSessionFromAuthHeader(req.header("authorization")); // Optional session
-    const pool = getPool();
-    const { username } = req.params;
-
-    const userRes = await pool.query(
-      `select id, email, username from users where lower(username) = lower($1) limit 1`,
-      [username]
-    );
-    const u = userRes.rows[0];
-    if (!u) return res.status(404).json({ error: "User not found" });
-
-    const profileRes = await pool.query(
-      `select * from profiles where user_id = $1 limit 1`,
-      [u.id]
-    );
-    const p = profileRes.rows[0];
-    if (!p) return res.status(404).json({ error: "Profile not found" });
-
-    const isOwner = session && session.userId === Number(u.id);
-    const settings = p.privacy_settings || {};
-
-    const checkVisible = (field: string) => {
-      if (isOwner) return true;
-      const val = settings[field] || "only_me";
-      if (val === "all_members") return !!session.userId;
-      if (val === "friends") return false; // Friends logic not implemented yet
-      return false; // only_me
-    };
-
-    const profile = {
-      userId: p.user_id,
-      username: checkVisible("username") ? u.username : null,
-      email: checkVisible("email") ? u.email : null,
-      fullName: p.full_name,
-      role: p.role,
-      company: p.company,
-      bio: p.bio,
-      industry: p.industry,
-      favoriteSports: p.favorite_sports,
-      businessInterests: p.business_interests,
-      lookingFor: p.looking_for || [],
-      badges: p.badges || [],
-      coverImageUrl: p.cover_image_url,
-      avatarUrl: p.avatar_url,
-      membershipTier: p.membership_tier,
-      location: p.location,
-      phone: checkVisible("phone") ? p.phone : null,
-      dob: checkVisible("dob") ? p.dob : null,
-      gender: p.gender,
-      aboutYou: p.about_you,
-      plTeam: p.pl_team,
-      worldTeam: p.world_team,
-      addressLine1: p.address_line1,
-      addressLine2: p.address_line2,
-      city: p.city,
-      zipCode: p.zip_code,
-      country: p.country,
-      bizType: p.biz_type,
-      bizName: p.biz_name,
-      regType: p.reg_type,
-      updatedAt: p.updated_at,
-    };
-
-    return res.status(200).json({ profile });
-  } catch (e) {
-    const message = e instanceof Error ? e.message : "Unknown error";
-    return res.status(500).json({ error: "Server error", details: message });
-  }
-});
 
 app.get("/api/online", async (req, res) => {
   try {
@@ -524,14 +373,14 @@ app.post("/api/events", async (req, res) => {
 app.get("/api/feed", async (req, res) => {
   try {
     await ensureSchema();
-    const session = getSessionFromAuthHeader(req.header("authorization"));
+    getSessionFromAuthHeader(req.header("authorization"));
     const pool = getPool();
     const filter = String(req.query.filter || "All").trim();
     const limitRaw = Number(req.query.limit || 30);
     const limit = Math.max(1, Math.min(50, Number.isFinite(limitRaw) ? limitRaw : 30));
 
     const where: string[] = [];
-    const params: unknown[] = [session.userId];
+    const params: unknown[] = [];
     if (filter && filter !== "All") {
       params.push(filter);
       where.push(`p.kind = $${params.length}`);
@@ -543,15 +392,11 @@ app.get("/api/feed", async (req, res) => {
         p.id,
         p.kind,
         p.content,
+        p.like_count,
         p.comment_count,
-        (
-          select coalesce(jsonb_object_agg(reaction_type, cnt), '{}'::jsonb)
-          from (
-            select reaction_type, count(*)::int as cnt from post_likes pl where pl.post_id = p.id group by reaction_type
-          ) sub
-        ) as reactions,
-        (select reaction_type from post_likes pl where pl.post_id = p.id and pl.user_id = $1) as user_reaction,
         p.created_at,
+        p.media_url,
+        p.media_type,
         u.id as user_id,
         u.username,
         pr.full_name,
@@ -572,10 +417,10 @@ app.get("/api/feed", async (req, res) => {
       id: r.id,
       kind: r.kind,
       content: r.content,
-      reactions: r.reactions,
-      userReaction: r.user_reaction || null,
-      stats: { comments: r.comment_count },
+      stats: { likes: r.like_count, comments: r.comment_count },
       createdAt: r.created_at,
+      mediaUrl: r.media_url,
+      mediaType: r.media_type,
       author: {
         id: r.user_id,
         username: r.username,
@@ -600,172 +445,28 @@ app.post("/api/feed", async (req, res) => {
     await ensureSchema();
     const session = getSessionFromAuthHeader(req.header("authorization"));
     const pool = getPool();
-    const body = (req.body || {}) as { kind?: "Post" | "Business" | "Events" | "Matches"; content?: string };
+    const body = (req.body || {}) as {
+      kind?: "Post" | "Business" | "Events" | "Matches";
+      content?: string;
+      mediaUrl?: string;
+      mediaType?: string;
+    };
     const kind = String(body.kind || "Post").trim();
     const content = String(body.content || "").trim();
-    if (!content) return res.status(400).json({ error: "Content required" });
+    const mediaUrl = String(body.mediaUrl || "").trim() || null;
+    const mediaType = String(body.mediaType || "").trim() || null;
+    if (!content && !mediaUrl) return res.status(400).json({ error: "Content or media required" });
     if (!["Post", "Business", "Events", "Matches"].includes(kind)) {
       return res.status(400).json({ error: "Invalid kind" });
     }
 
     const inserted = await pool.query(
-      `insert into posts (user_id, kind, content) values ($1,$2,$3)
-       returning id, kind, content, like_count, comment_count, created_at`,
-      [session.userId, kind, content]
+      `insert into posts (user_id, kind, content, media_url, media_type)
+       values ($1,$2,$3,$4,$5)
+       returning id, kind, content, like_count, comment_count, created_at, media_url, media_type`,
+      [session.userId, kind, content || "", mediaUrl, mediaType]
     );
     return res.status(201).json({ post: inserted.rows[0] });
-  } catch (e) {
-    const message = e instanceof Error ? e.message : "Unknown error";
-    if (message === "Unauthorized" || message.toLowerCase().includes("jwt")) {
-      return res.status(401).json({ error: "Unauthorized" });
-    }
-    return res.status(500).json({ error: "Server error", details: message });
-  }
-});
-
-app.post("/api/feed/:id/react", async (req, res) => {
-  try {
-    await ensureSchema();
-    const session = getSessionFromAuthHeader(req.header("authorization"));
-    const pool = getPool();
-    const postId = Number(req.params.id);
-    const body = (req.body || {}) as { reaction?: string };
-    const reaction = String(body.reaction || "like").trim();
-    if (!postId) return res.status(400).json({ error: "Invalid post ID" });
-
-    const allowed = new Set(["like", "love", "haha", "wow", "sad", "angry"]);
-    if (!allowed.has(reaction)) return res.status(400).json({ error: "Invalid reaction" });
-
-    await pool.query('BEGIN');
-    await pool.query(
-      `insert into post_likes (user_id, post_id, reaction_type) values ($1, $2, $3) 
-       on conflict (user_id, post_id) do update set reaction_type = excluded.reaction_type returning 1`,
-      [session.userId, postId, reaction]
-    );
-    await pool.query('COMMIT');
-    return res.status(200).json({ success: true, reaction });
-  } catch (e) {
-    const pool = getPool();
-    await pool.query('ROLLBACK').catch(() => {});
-    const message = e instanceof Error ? e.message : "Unknown error";
-    if (message === "Unauthorized" || message.toLowerCase().includes("jwt")) {
-      return res.status(401).json({ error: "Unauthorized" });
-    }
-    return res.status(500).json({ error: "Server error", details: message });
-  }
-});
-
-app.delete("/api/feed/:id/react", async (req, res) => {
-  try {
-    await ensureSchema();
-    const session = getSessionFromAuthHeader(req.header("authorization"));
-    const pool = getPool();
-    const postId = Number(req.params.id);
-    if (!postId) return res.status(400).json({ error: "Invalid post ID" });
-
-    await pool.query('BEGIN');
-    await pool.query(
-      `delete from post_likes where user_id = $1 and post_id = $2 returning 1`,
-      [session.userId, postId]
-    );
-    await pool.query('COMMIT');
-    return res.status(200).json({ success: true });
-  } catch (e) {
-    const pool = getPool();
-    await pool.query('ROLLBACK').catch(() => {});
-    const message = e instanceof Error ? e.message : "Unknown error";
-    if (message === "Unauthorized" || message.toLowerCase().includes("jwt")) {
-      return res.status(401).json({ error: "Unauthorized" });
-    }
-    return res.status(500).json({ error: "Server error", details: message });
-  }
-});
-
-app.post("/api/feed/:id/comment", async (req, res) => {
-  try {
-    await ensureSchema();
-    const session = getSessionFromAuthHeader(req.header("authorization"));
-    const pool = getPool();
-    const postId = Number(req.params.id);
-    const body = (req.body || {}) as { content?: string; parentId?: number };
-    const content = String(body.content || "").trim();
-    const parentId = body.parentId ? Number(body.parentId) : null;
-    if (!postId) return res.status(400).json({ error: "Invalid post ID" });
-    if (!content) return res.status(400).json({ error: "Content required" });
-
-    await pool.query('BEGIN');
-    const inserted = await pool.query(
-      `insert into post_comments (user_id, post_id, parent_id, content) values ($1, $2, $3, $4) returning id, content, created_at, parent_id`,
-      [session.userId, postId, parentId, content]
-    );
-    await pool.query(`update posts set comment_count = comment_count + 1 where id = $1`, [postId]);
-    await pool.query('COMMIT');
-
-    const meRes = await pool.query(`
-      select u.id, u.username, p.full_name, p.role, p.company, p.avatar_url 
-      from users u left join profiles p on p.user_id = u.id where u.id = $1 limit 1
-    `, [session.userId]);
-    const me = meRes.rows[0];
-
-    return res.status(201).json({ 
-      comment: {
-        id: inserted.rows[0].id,
-        parentId: inserted.rows[0].parent_id,
-        content: inserted.rows[0].content,
-        createdAt: inserted.rows[0].created_at,
-        author: {
-          id: me.id,
-          username: me.username,
-          fullName: me.full_name,
-          role: me.role,
-          company: me.company,
-          avatarUrl: me.avatar_url,
-        }
-      } 
-    });
-  } catch (e) {
-    const pool = getPool();
-    await pool.query('ROLLBACK').catch(() => {});
-    const message = e instanceof Error ? e.message : "Unknown error";
-    if (message === "Unauthorized" || message.toLowerCase().includes("jwt")) {
-      return res.status(401).json({ error: "Unauthorized" });
-    }
-    return res.status(500).json({ error: "Server error", details: message });
-  }
-});
-
-app.get("/api/feed/:id/comments", async (req, res) => {
-  try {
-    await ensureSchema();
-    getSessionFromAuthHeader(req.header("authorization"));
-    const pool = getPool();
-    const postId = Number(req.params.id);
-    if (!postId) return res.status(400).json({ error: "Invalid post ID" });
-
-    const result = await pool.query(`
-      select c.id, c.parent_id, c.content, c.created_at, u.id as user_id, u.username, p.full_name, p.role, p.company, p.avatar_url
-      from post_comments c
-      join users u on u.id = c.user_id
-      left join profiles p on p.user_id = u.id
-      where c.post_id = $1
-      order by c.created_at asc
-    `, [postId]);
-
-    const comments = result.rows.map(r => ({
-      id: r.id,
-      parentId: r.parent_id,
-      content: r.content,
-      createdAt: r.created_at,
-      author: {
-        id: r.user_id,
-        username: r.username,
-        fullName: r.full_name,
-        role: r.role,
-        company: r.company,
-        avatarUrl: r.avatar_url,
-      }
-    }));
-    return res.status(200).json({ comments });
   } catch (e) {
     const message = e instanceof Error ? e.message : "Unknown error";
     if (message === "Unauthorized" || message.toLowerCase().includes("jwt")) {
@@ -810,7 +511,7 @@ app.get("/api/dashboard", async (req, res) => {
     const events = upcomingEventCountRes.rows[0]?.c || 0;
 
     const feedWhere: string[] = [];
-    const feedParams: unknown[] = [session.userId];
+    const feedParams: unknown[] = [];
     if (filter && filter !== "All") {
       feedParams.push(filter);
       feedWhere.push(`p.kind = $${feedParams.length}`);
@@ -821,15 +522,11 @@ app.get("/api/dashboard", async (req, res) => {
         p.id,
         p.kind,
         p.content,
+        p.like_count,
         p.comment_count,
-        (
-          select coalesce(jsonb_object_agg(reaction_type, cnt), '{}'::jsonb)
-          from (
-            select reaction_type, count(*)::int as cnt from post_likes pl where pl.post_id = p.id group by reaction_type
-          ) sub
-        ) as reactions,
-        (select reaction_type from post_likes pl where pl.post_id = p.id and pl.user_id = $1) as user_reaction,
         p.created_at,
+        p.media_url,
+        p.media_type,
         u.id as user_id,
         u.username,
         pr.full_name,
@@ -848,11 +545,11 @@ app.get("/api/dashboard", async (req, res) => {
     const feed = feedRes.rows.map((r) => ({
       id: r.id,
       kind: r.kind,
-      reactions: r.reactions,
-      userReaction: r.user_reaction || null,
       content: r.content,
       createdAt: r.created_at,
-      stats: { comments: r.comment_count },
+      stats: { likes: r.like_count, comments: r.comment_count },
+      mediaUrl: r.media_url,
+      mediaType: r.media_type,
       author: {
         id: r.user_id,
         username: r.username,
@@ -901,7 +598,7 @@ app.get("/api/dashboard", async (req, res) => {
 
     const onlineRes = await pool.query(
       `
-      select u.id, u.username, u.last_seen, p.full_name, p.avatar_url
+      select u.id, u.username, u.last_seen, p.full_name
       from users u
       left join profiles p on p.user_id = u.id
       where u.last_seen >= (now() - interval '15 minutes')
@@ -913,7 +610,6 @@ app.get("/api/dashboard", async (req, res) => {
       id: r.id,
       username: r.username,
       fullName: r.full_name,
-      avatarUrl: r.avatar_url,
       lastSeen: r.last_seen,
     }));
 
@@ -1191,133 +887,355 @@ app.post("/api/bookings", async (req, res) => {
   }
 });
 
-app.get("/api/connect", async (req, res) => {
+// ── Like / Unlike a post ──────────────────────────────────────────────────────
+app.post("/api/feed/:id/like", async (req, res) => {
+  try {
+    await ensureSchema();
+    const session = getSessionFromAuthHeader(req.header("authorization"));
+    const pool = getPool();
+    const postId = Number(req.params.id);
+    if (!postId) return res.status(400).json({ error: "Invalid post id" });
+
+    // Toggle: try insert; if conflict then delete
+    const existing = await pool.query(
+      `select 1 from post_likes where user_id=$1 and post_id=$2`,
+      [session.userId, postId]
+    );
+    if (existing.rows.length > 0) {
+      await pool.query(`delete from post_likes where user_id=$1 and post_id=$2`, [session.userId, postId]);
+      await pool.query(`update posts set like_count = greatest(0, like_count - 1) where id=$1`, [postId]);
+      const cnt = await pool.query(`select like_count from posts where id=$1`, [postId]);
+      return res.status(200).json({ liked: false, likeCount: cnt.rows[0]?.like_count ?? 0 });
+    } else {
+      await pool.query(`insert into post_likes(user_id,post_id) values($1,$2) on conflict do nothing`, [session.userId, postId]);
+      await pool.query(`update posts set like_count = like_count + 1 where id=$1`, [postId]);
+      const cnt = await pool.query(`select like_count from posts where id=$1`, [postId]);
+      return res.status(200).json({ liked: true, likeCount: cnt.rows[0]?.like_count ?? 0 });
+    }
+  } catch (e) {
+    const message = e instanceof Error ? e.message : "Unknown error";
+    if (message === "Unauthorized" || message.toLowerCase().includes("jwt")) return res.status(401).json({ error: "Unauthorized" });
+    return res.status(500).json({ error: "Server error", details: message });
+  }
+});
+
+// ── Save / Unsave a post ──────────────────────────────────────────────────────
+app.post("/api/feed/:id/save", async (req, res) => {
+  try {
+    await ensureSchema();
+    const session = getSessionFromAuthHeader(req.header("authorization"));
+    const pool = getPool();
+    const postId = Number(req.params.id);
+    if (!postId) return res.status(400).json({ error: "Invalid post id" });
+
+    const existing = await pool.query(
+      `select 1 from post_saves where user_id=$1 and post_id=$2`,
+      [session.userId, postId]
+    );
+    if (existing.rows.length > 0) {
+      await pool.query(`delete from post_saves where user_id=$1 and post_id=$2`, [session.userId, postId]);
+      return res.status(200).json({ saved: false });
+    } else {
+      await pool.query(`insert into post_saves(user_id,post_id) values($1,$2) on conflict do nothing`, [session.userId, postId]);
+      return res.status(200).json({ saved: true });
+    }
+  } catch (e) {
+    const message = e instanceof Error ? e.message : "Unknown error";
+    if (message === "Unauthorized" || message.toLowerCase().includes("jwt")) return res.status(401).json({ error: "Unauthorized" });
+    return res.status(500).json({ error: "Server error", details: message });
+  }
+});
+
+// ── Saved posts ───────────────────────────────────────────────────────────────
+app.get("/api/saved", async (req, res) => {
+  try {
+    await ensureSchema();
+    const session = getSessionFromAuthHeader(req.header("authorization"));
+    const pool = getPool();
+    const result = await pool.query(
+      `select p.id, p.kind, p.content, p.like_count, p.comment_count, p.media_url, p.media_type, p.media_urls, p.created_at,
+              u.id as user_id, u.username, pr.full_name, pr.role, pr.company, pr.avatar_url
+       from post_saves s
+       join posts p on p.id = s.post_id
+       join users u on u.id = p.user_id
+       left join profiles pr on pr.user_id = u.id
+       where s.user_id = $1
+       order by s.created_at desc
+       limit 50`,
+      [session.userId]
+    );
+    const posts = result.rows.map((r) => ({
+      id: r.id, kind: r.kind, content: r.content,
+      stats: { likes: r.like_count, comments: r.comment_count },
+      mediaUrl: r.media_url, mediaType: r.media_type, mediaUrls: r.media_urls || [],
+      createdAt: r.created_at,
+      author: { id: r.user_id, username: r.username, fullName: r.full_name, role: r.role, company: r.company, avatarUrl: r.avatar_url },
+    }));
+    return res.status(200).json({ posts });
+  } catch (e) {
+    const message = e instanceof Error ? e.message : "Unknown error";
+    if (message === "Unauthorized" || message.toLowerCase().includes("jwt")) return res.status(401).json({ error: "Unauthorized" });
+    return res.status(500).json({ error: "Server error", details: message });
+  }
+});
+
+// ── Leaderboard ───────────────────────────────────────────────────────────────
+app.get("/api/leaderboard", async (req, res) => {
+  try {
+    await ensureSchema();
+    getSessionFromAuthHeader(req.header("authorization"));
+    const pool = getPool();
+    const result = await pool.query(
+      `select u.id, u.username,
+              p.full_name, p.avatar_url, p.membership_tier, p.role, p.company,
+              coalesce(pc.post_count,0) as post_count,
+              coalesce(lk.like_count,0) as like_count,
+              coalesce(ev.event_count,0) as event_count
+       from users u
+       left join profiles p on p.user_id = u.id
+       left join (select user_id, count(*)::int as post_count from posts group by user_id) pc on pc.user_id = u.id
+       left join (select p2.user_id, coalesce(sum(p2.like_count),0)::int as like_count from posts p2 group by p2.user_id) lk on lk.user_id = u.id
+       left join (select user_id, count(*)::int as event_count from event_rsvps group by user_id) ev on ev.user_id = u.id
+       order by (coalesce(pc.post_count,0)*3 + coalesce(lk.like_count,0)*2 + coalesce(ev.event_count,0)*5) desc
+       limit 50`
+    );
+    const members = result.rows.map((r, i) => ({
+      rank: i + 1,
+      id: r.id, username: r.username, fullName: r.full_name,
+      avatarUrl: r.avatar_url, membershipTier: r.membership_tier || "Gold",
+      role: r.role, company: r.company,
+      postCount: r.post_count, likeCount: r.like_count, eventCount: r.event_count,
+      score: r.post_count * 3 + r.like_count * 2 + r.event_count * 5,
+    }));
+    return res.status(200).json({ members });
+  } catch (e) {
+    const message = e instanceof Error ? e.message : "Unknown error";
+    if (message === "Unauthorized" || message.toLowerCase().includes("jwt")) return res.status(401).json({ error: "Unauthorized" });
+    return res.status(500).json({ error: "Server error", details: message });
+  }
+});
+
+// ── Live Matches ──────────────────────────────────────────────────────────────
+app.get("/api/live-matches", async (req, res) => {
   try {
     await ensureSchema();
     const session = getSessionFromAuthHeader(req.header("authorization"));
     const pool = getPool();
 
-    const connections = await pool.query(
-      `select u.id, u.username, p.full_name, p.avatar_url, p.role
-       from connections c
-       join users u on (u.id = c.requester_id or u.id = c.receiver_id) and u.id <> $1
-       left join profiles p on p.user_id = u.id
-       where (c.requester_id = $1 or c.receiver_id = $1) and c.status = 'accepted'`,
+    // Seed sample matches if table is empty
+    const countRes = await pool.query(`select count(*)::int as c from live_matches`);
+    if (countRes.rows[0].c === 0) {
+      const now = new Date();
+      const fixtures = [
+        { title: "Premier League", sport: "Football", home: "Manchester City", away: "Arsenal", sh: 2, sa: 1, status: "live", offset: -45 },
+        { title: "La Liga", sport: "Football", home: "Real Madrid", away: "Barcelona", sh: 0, sa: 0, status: "upcoming", offset: 60 },
+        { title: "Champions League", sport: "Football", home: "Bayern Munich", away: "PSG", sh: 1, sa: 1, status: "live", offset: -20 },
+        { title: "ATP Masters", sport: "Tennis", home: "Djokovic", away: "Alcaraz", sh: 1, sa: 1, status: "live", offset: -90 },
+        { title: "IPL T20", sport: "Cricket", home: "Mumbai Indians", away: "CSK", sh: 0, sa: 0, status: "upcoming", offset: 120 },
+        { title: "NBA Playoffs", sport: "Basketball", home: "Warriors", away: "Lakers", sh: 0, sa: 0, status: "upcoming", offset: 180 },
+        { title: "Serie A", sport: "Football", home: "AC Milan", away: "Juventus", sh: 0, sa: 0, status: "upcoming", offset: 240 },
+        { title: "Bundesliga", sport: "Football", home: "Dortmund", away: "Leverkusen", sh: 3, sa: 2, status: "finished", offset: -120 },
+      ];
+      for (const f of fixtures) {
+        const startsAt = new Date(now.getTime() + f.offset * 60_000);
+        await pool.query(
+          `insert into live_matches(title,sport,team_home,team_away,score_home,score_away,status,starts_at,venue) values($1,$2,$3,$4,$5,$6,$7,$8,$9) on conflict do nothing`,
+          [f.title, f.sport, f.home, f.away, f.sh, f.sa, f.status, startsAt.toISOString(), "Sports Lounge"]
+        );
+      }
+    }
+
+    const result = await pool.query(
+      `select lm.*, coalesce(mr.c,0) as my_rsvp
+       from live_matches lm
+       left join (select match_id, 1 as c from match_rsvps where user_id=$1) mr on mr.match_id = lm.id
+       order by case status when 'live' then 0 when 'upcoming' then 1 else 2 end, starts_at asc
+       limit 30`,
       [session.userId]
     );
-
-    const pendingIncoming = await pool.query(
-      `select u.id, u.username, p.full_name, p.avatar_url, p.role
-       from connections c
-       join users u on u.id = c.requester_id
-       left join profiles p on p.user_id = u.id
-       where c.receiver_id = $1 and c.status = 'pending'`,
-      [session.userId]
-    );
-
-    const pendingOutgoing = await pool.query(
-      `select u.id, u.username, p.full_name, p.avatar_url, p.role
-       from connections c
-       join users u on u.id = c.receiver_id
-       left join profiles p on p.user_id = u.id
-       where c.requester_id = $1 and c.status = 'pending'`,
-      [session.userId]
-    );
-
-    return res.status(200).json({
-      connections: connections.rows,
-      pendingIncoming: pendingIncoming.rows,
-      pendingOutgoing: pendingOutgoing.rows,
-    });
+    return res.status(200).json({ matches: result.rows });
   } catch (e) {
-    return res.status(500).json({ error: e instanceof Error ? e.message : "Error" });
+    const message = e instanceof Error ? e.message : "Unknown error";
+    if (message === "Unauthorized" || message.toLowerCase().includes("jwt")) return res.status(401).json({ error: "Unauthorized" });
+    return res.status(500).json({ error: "Server error", details: message });
   }
 });
 
-app.post("/api/connect", async (req, res) => {
+// ── Match RSVP (watch party) ──────────────────────────────────────────────────
+app.post("/api/live-matches/:id/rsvp", async (req, res) => {
   try {
     await ensureSchema();
     const session = getSessionFromAuthHeader(req.header("authorization"));
-    const { targetId } = req.body;
-    if (!targetId) return res.status(400).json({ error: "targetId required" });
     const pool = getPool();
+    const matchId = Number(req.params.id);
+    if (!matchId) return res.status(400).json({ error: "Invalid match id" });
 
-    await pool.query(
-      `insert into connections (requester_id, receiver_id, status)
-       values ($1, $2, 'pending')
-       on conflict (requester_id, receiver_id) do nothing`,
-      [session.userId, targetId]
-    );
-    return res.status(200).json({ success: true });
+    const existing = await pool.query(`select 1 from match_rsvps where user_id=$1 and match_id=$2`, [session.userId, matchId]);
+    if (existing.rows.length > 0) {
+      await pool.query(`delete from match_rsvps where user_id=$1 and match_id=$2`, [session.userId, matchId]);
+      await pool.query(`update live_matches set watch_party_count = greatest(0, watch_party_count - 1) where id=$1`, [matchId]);
+      return res.status(200).json({ rsvped: false });
+    } else {
+      await pool.query(`insert into match_rsvps(user_id,match_id) values($1,$2) on conflict do nothing`, [session.userId, matchId]);
+      await pool.query(`update live_matches set watch_party_count = watch_party_count + 1 where id=$1`, [matchId]);
+      return res.status(200).json({ rsvped: true });
+    }
   } catch (e) {
-    return res.status(500).json({ error: e instanceof Error ? e.message : "Error" });
+    const message = e instanceof Error ? e.message : "Unknown error";
+    if (message === "Unauthorized" || message.toLowerCase().includes("jwt")) return res.status(401).json({ error: "Unauthorized" });
+    return res.status(500).json({ error: "Server error", details: message });
   }
 });
 
-app.put("/api/connect", async (req, res) => {
+// ── Business Hub ──────────────────────────────────────────────────────────────
+app.get("/api/business", async (req, res) => {
+  try {
+    await ensureSchema();
+    getSessionFromAuthHeader(req.header("authorization"));
+    const pool = getPool();
+    const category = String(req.query.category || "").trim();
+    const where = category && category !== "All" ? `where bp.category = $1` : "";
+    const params = category && category !== "All" ? [category] : [];
+    const result = await pool.query(
+      `select bp.id, bp.category, bp.title, bp.description, bp.contact, bp.created_at,
+              u.id as user_id, u.username, p.full_name, p.avatar_url, p.role, p.company
+       from business_posts bp
+       join users u on u.id = bp.user_id
+       left join profiles p on p.user_id = u.id
+       ${where}
+       order by bp.created_at desc
+       limit 50`,
+      params
+    );
+    return res.status(200).json({ posts: result.rows });
+  } catch (e) {
+    const message = e instanceof Error ? e.message : "Unknown error";
+    if (message === "Unauthorized" || message.toLowerCase().includes("jwt")) return res.status(401).json({ error: "Unauthorized" });
+    return res.status(500).json({ error: "Server error", details: message });
+  }
+});
+
+app.post("/api/business", async (req, res) => {
   try {
     await ensureSchema();
     const session = getSessionFromAuthHeader(req.header("authorization"));
-    const { requesterId } = req.body;
-    if (!requesterId) return res.status(400).json({ error: "requesterId required" });
     const pool = getPool();
-
-    await pool.query(
-      `update connections set status = 'accepted'
-       where requester_id = $1 and receiver_id = $2`,
-      [requesterId, session.userId]
+    const body = (req.body || {}) as { category?: string; title?: string; description?: string; contact?: string };
+    const category = String(body.category || "Opportunity").trim();
+    const title = String(body.title || "").trim();
+    const description = String(body.description || "").trim();
+    const contact = String(body.contact || "").trim() || null;
+    if (!title || !description) return res.status(400).json({ error: "Title and description required" });
+    const inserted = await pool.query(
+      `insert into business_posts(user_id,category,title,description,contact) values($1,$2,$3,$4,$5) returning *`,
+      [session.userId, category, title, description, contact]
     );
-    return res.status(200).json({ success: true });
+    return res.status(201).json({ post: inserted.rows[0] });
   } catch (e) {
-    return res.status(500).json({ error: e instanceof Error ? e.message : "Error" });
+    const message = e instanceof Error ? e.message : "Unknown error";
+    if (message === "Unauthorized" || message.toLowerCase().includes("jwt")) return res.status(401).json({ error: "Unauthorized" });
+    return res.status(500).json({ error: "Server error", details: message });
   }
 });
 
-app.delete("/api/connect", async (req, res) => {
+// ── Events RSVP ───────────────────────────────────────────────────────────────
+app.post("/api/events/:id/rsvp", async (req, res) => {
   try {
+    await ensureSchema();
     const session = getSessionFromAuthHeader(req.header("authorization"));
-    const { targetId } = req.body;
-    if (!targetId) return res.status(400).json({ error: "targetId required" });
     const pool = getPool();
+    const eventId = Number(req.params.id);
+    if (!eventId) return res.status(400).json({ error: "Invalid event id" });
 
-    await pool.query(
-      `delete from connections
-       where (requester_id = $1 and receiver_id = $2)
-          or (requester_id = $2 and receiver_id = $1)`,
-      [session.userId, targetId]
-    );
-    return res.status(200).json({ success: true });
+    const existing = await pool.query(`select 1 from event_rsvps where user_id=$1 and event_id=$2`, [session.userId, eventId]);
+    if (existing.rows.length > 0) {
+      await pool.query(`delete from event_rsvps where user_id=$1 and event_id=$2`, [session.userId, eventId]);
+      await pool.query(`update events set rsvp_count = greatest(0, rsvp_count - 1) where id=$1`, [eventId]);
+      return res.status(200).json({ rsvped: false });
+    } else {
+      await pool.query(`insert into event_rsvps(user_id,event_id) values($1,$2) on conflict do nothing`, [session.userId, eventId]);
+      await pool.query(`update events set rsvp_count = rsvp_count + 1 where id=$1`, [eventId]);
+      return res.status(200).json({ rsvped: true });
+    }
   } catch (e) {
-    return res.status(500).json({ error: e instanceof Error ? e.message : "Error" });
+    const message = e instanceof Error ? e.message : "Unknown error";
+    if (message === "Unauthorized" || message.toLowerCase().includes("jwt")) return res.status(401).json({ error: "Unauthorized" });
+    return res.status(500).json({ error: "Server error", details: message });
   }
 });
 
+// ── Public profile by username ────────────────────────────────────────────────
+app.get("/api/profile/:username", async (req, res) => {
+  try {
+    await ensureSchema();
+    getSessionFromAuthHeader(req.header("authorization"));
+    const pool = getPool();
+    const username = req.params.username;
+    const userRes = await pool.query(`select id, username from users where username=$1 limit 1`, [username]);
+    if (!userRes.rows[0]) return res.status(404).json({ error: "User not found" });
+    const u = userRes.rows[0];
+    const profileRes = await pool.query(
+      `select full_name, role, company, bio, industry, favorite_sports, business_interests, looking_for, badges, cover_image_url, avatar_url, membership_tier, location from profiles where user_id=$1`,
+      [u.id]
+    );
+    const p = profileRes.rows[0] || {};
+    const postCount = (await pool.query(`select count(*)::int as c from posts where user_id=$1`, [u.id])).rows[0]?.c || 0;
+    return res.status(200).json({ user: { id: u.id, username: u.username }, profile: p, postCount });
+  } catch (e) {
+    const message = e instanceof Error ? e.message : "Unknown error";
+    if (message === "Unauthorized" || message.toLowerCase().includes("jwt")) return res.status(401).json({ error: "Unauthorized" });
+    return res.status(500).json({ error: "Server error", details: message });
+  }
+});
+
+// ── User posts ────────────────────────────────────────────────────────────────
+app.get("/api/users/:id/posts", async (req, res) => {
+  try {
+    await ensureSchema();
+    getSessionFromAuthHeader(req.header("authorization"));
+    const pool = getPool();
+    const userId = Number(req.params.id);
+    const result = await pool.query(
+      `select p.id, p.kind, p.content, p.like_count, p.comment_count, p.media_url, p.media_type, p.media_urls, p.created_at
+       from posts p where p.user_id=$1 order by p.created_at desc limit 50`,
+      [userId]
+    );
+    return res.status(200).json({ posts: result.rows.map((r) => ({ ...r, mediaUrls: r.media_urls || [] })) });
+  } catch (e) {
+    const message = e instanceof Error ? e.message : "Unknown error";
+    if (message === "Unauthorized" || message.toLowerCase().includes("jwt")) return res.status(401).json({ error: "Unauthorized" });
+    return res.status(500).json({ error: "Server error", details: message });
+  }
+});
+
+// ── Messages (DM) ─────────────────────────────────────────────────────────────
 app.get("/api/messages", async (req, res) => {
   try {
     await ensureSchema();
     const session = getSessionFromAuthHeader(req.header("authorization"));
     const pool = getPool();
-
-    const result = await pool.query(
-      `with last_messages as (
-         select distinct on (conversation_id)
-           id, sender_id, receiver_id, content, created_at, read_at,
-           case when sender_id = $1 then receiver_id else sender_id end as other_id
-         from messages
-         cross join lateral (select least(sender_id, receiver_id) || '-' || greatest(sender_id, receiver_id) as conversation_id) c
-         where sender_id = $1 or receiver_id = $1
-         order by conversation_id, created_at desc
-       )
-       select lm.*, u.username, p.full_name, p.avatar_url
-       from last_messages lm
-       join users u on u.id = lm.other_id
-       left join profiles p on p.user_id = u.id
-       order by lm.created_at desc`,
+    const conversations = await pool.query(
+      `with latest_msgs as (
+        select distinct on (least(sender_id, receiver_id), greatest(sender_id, receiver_id))
+          id, sender_id, receiver_id, content, created_at, read_at,
+          case when sender_id=$1 then receiver_id else sender_id end as interactant_id
+        from messages
+        where sender_id=$1 or receiver_id=$1
+        order by least(sender_id, receiver_id), greatest(sender_id, receiver_id), created_at desc
+      )
+      select l.id, l.interactant_id as other_id, l.content, l.created_at, l.read_at,
+             u.username, p.full_name, p.avatar_url
+      from latest_msgs l
+      join users u on u.id = l.interactant_id
+      left join profiles p on p.user_id = u.id
+      order by l.created_at desc`,
       [session.userId]
     );
-    return res.status(200).json({ conversations: result.rows });
+    return res.status(200).json({ conversations: conversations.rows });
   } catch (e) {
-    return res.status(500).json({ error: e instanceof Error ? e.message : "Error" });
+    const message = e instanceof Error ? e.message : "Unknown error";
+    if (message === "Unauthorized" || message.toLowerCase().includes("jwt")) return res.status(401).json({ error: "Unauthorized" });
+    return res.status(500).json({ error: "Server error", details: message });
   }
 });
 
@@ -1325,27 +1243,26 @@ app.get("/api/messages/:userId", async (req, res) => {
   try {
     await ensureSchema();
     const session = getSessionFromAuthHeader(req.header("authorization"));
-    const otherId = Number(req.params.userId);
     const pool = getPool();
-
-    const result = await pool.query(
-      `select * from messages
-       where (sender_id = $1 and receiver_id = $2)
-          or (sender_id = $2 and receiver_id = $1)
-       order by created_at asc`,
+    const otherId = Number(req.params.userId);
+    const history = await pool.query(
+      `select id, sender_id, receiver_id, content, created_at, read_at
+       from messages
+       where (sender_id=$1 and receiver_id=$2) or (sender_id=$2 and receiver_id=$1)
+       order by created_at asc
+       limit 200`,
       [session.userId, otherId]
     );
-
     // Mark as read
     await pool.query(
-      `update messages set read_at = now()
-       where sender_id = $1 and receiver_id = $2 and read_at is null`,
-      [otherId, session.userId]
+      `update messages set read_at=now() where receiver_id=$1 and sender_id=$2 and read_at is null`,
+      [session.userId, otherId]
     );
-
-    return res.status(200).json({ messages: result.rows });
+    return res.status(200).json({ messages: history.rows });
   } catch (e) {
-    return res.status(500).json({ error: e instanceof Error ? e.message : "Error" });
+    const message = e instanceof Error ? e.message : "Unknown error";
+    if (message === "Unauthorized" || message.toLowerCase().includes("jwt")) return res.status(401).json({ error: "Unauthorized" });
+    return res.status(500).json({ error: "Server error", details: message });
   }
 });
 
@@ -1353,31 +1270,167 @@ app.post("/api/messages", async (req, res) => {
   try {
     await ensureSchema();
     const session = getSessionFromAuthHeader(req.header("authorization"));
-    const { receiverId, content } = req.body;
-    if (!receiverId || !content) return res.status(400).json({ error: "receiverId and content required" });
     const pool = getPool();
-
-    const result = await pool.query(
-      `insert into messages (sender_id, receiver_id, content)
-       values ($1, $2, $3)
-       returning *`,
+    const body = req.body as { receiverId?: number; content?: string };
+    const receiverId = Number(body.receiverId);
+    const content = String(body.content || "").trim();
+    if (!receiverId || !content) return res.status(400).json({ error: "receiverId and content required" });
+    const inserted = await pool.query(
+      `insert into messages(sender_id,receiver_id,content) values($1,$2,$3) returning id,sender_id,receiver_id,content,created_at,read_at`,
       [session.userId, receiverId, content]
     );
-    return res.status(201).json({ message: result.rows[0] });
+    return res.status(201).json({ message: inserted.rows[0] });
   } catch (e) {
-    return res.status(500).json({ error: e instanceof Error ? e.message : "Error" });
+    const message = e instanceof Error ? e.message : "Unknown error";
+    if (message === "Unauthorized" || message.toLowerCase().includes("jwt")) return res.status(401).json({ error: "Unauthorized" });
+    return res.status(500).json({ error: "Server error", details: message });
   }
 });
 
-// Serve static files from the Vite build
-app.use(express.static(path.join(__dirname, "../dist")));
-
-// SPA fallback: send index.html for any unknown routes (handling React Router)
-app.get(/^(?!\/api).*/, (req: express.Request, res: express.Response) => {
-  res.sendFile(path.join(__dirname, "../dist/index.html"));
+// ── Friends / Connections ─────────────────────────────────────────────────────
+// GET /api/friends – list accepted connections for current user (with profile info)
+app.get("/api/friends", async (req, res) => {
+  try {
+    await ensureSchema();
+    const session = getSessionFromAuthHeader(req.header("authorization"));
+    const pool = getPool();
+    const result = await pool.query(
+      `select u.id, u.username, p.full_name, p.avatar_url, p.role, p.company,
+              p.membership_tier, p.location,
+              c.created_at as connected_at
+       from connections c
+       join users u on u.id = case
+         when c.requester_id = $1 then c.addressee_id
+         else c.requester_id
+       end
+       left join profiles p on p.user_id = u.id
+       where (c.requester_id = $1 or c.addressee_id = $1)
+         and c.status = 'accepted'
+       order by c.created_at desc`,
+      [session.userId]
+    );
+    return res.status(200).json({ friends: result.rows });
+  } catch (e) {
+    const message = e instanceof Error ? e.message : "Unknown error";
+    if (message === "Unauthorized" || message.toLowerCase().includes("jwt")) return res.status(401).json({ error: "Unauthorized" });
+    return res.status(500).json({ error: "Server error", details: message });
+  }
 });
 
-const port = Number(process.env.PORT || process.env.API_PORT || 8787);
-app.listen(port, "0.0.0.0", () => {
-    console.log(`Server running on port ${port}`);
+// GET /api/friends/requests – incoming pending connection requests
+app.get("/api/friends/requests", async (req, res) => {
+  try {
+    await ensureSchema();
+    const session = getSessionFromAuthHeader(req.header("authorization"));
+    const pool = getPool();
+    const result = await pool.query(
+      `select c.requester_id, c.created_at as requested_at,
+              u.id, u.username, p.full_name, p.avatar_url, p.role, p.company
+       from connections c
+       join users u on u.id = c.requester_id
+       left join profiles p on p.user_id = u.id
+       where c.addressee_id = $1 and c.status = 'pending'
+       order by c.created_at desc`,
+      [session.userId]
+    );
+    return res.status(200).json({ requests: result.rows });
+  } catch (e) {
+    const message = e instanceof Error ? e.message : "Unknown error";
+    if (message === "Unauthorized" || message.toLowerCase().includes("jwt")) return res.status(401).json({ error: "Unauthorized" });
+    return res.status(500).json({ error: "Server error", details: message });
+  }
+});
+
+// POST /api/friends/:userId – send or cancel a connection request
+app.post("/api/friends/:userId", async (req, res) => {
+  try {
+    await ensureSchema();
+    const session = getSessionFromAuthHeader(req.header("authorization"));
+    const pool = getPool();
+    const targetId = Number(req.params.userId);
+    if (!targetId || targetId === session.userId) return res.status(400).json({ error: "Invalid user" });
+
+    // Check if connection already exists in either direction
+    const existing = await pool.query(
+      `select requester_id, addressee_id, status from connections
+       where (requester_id=$1 and addressee_id=$2) or (requester_id=$2 and addressee_id=$1)`,
+      [session.userId, targetId]
+    );
+
+    if (existing.rows.length > 0) {
+      const row = existing.rows[0];
+      if (row.requester_id === session.userId) {
+        // Cancel own pending request
+        await pool.query(`delete from connections where requester_id=$1 and addressee_id=$2`, [session.userId, targetId]);
+        return res.status(200).json({ status: "cancelled" });
+      }
+      return res.status(200).json({ status: row.status, message: "Connection already exists" });
+    }
+
+    await pool.query(
+      `insert into connections(requester_id, addressee_id, status) values($1,$2,'pending') on conflict do nothing`,
+      [session.userId, targetId]
+    );
+    return res.status(201).json({ status: "pending" });
+  } catch (e) {
+    const message = e instanceof Error ? e.message : "Unknown error";
+    if (message === "Unauthorized" || message.toLowerCase().includes("jwt")) return res.status(401).json({ error: "Unauthorized" });
+    return res.status(500).json({ error: "Server error", details: message });
+  }
+});
+
+// PUT /api/friends/:userId – accept or reject a pending request
+app.put("/api/friends/:userId", async (req, res) => {
+  try {
+    await ensureSchema();
+    const session = getSessionFromAuthHeader(req.header("authorization"));
+    const pool = getPool();
+    const requesterId = Number(req.params.userId);
+    const body = req.body as { action: "accept" | "reject" };
+    const action = body.action;
+    if (!action || !["accept", "reject"].includes(action)) return res.status(400).json({ error: "action must be accept or reject" });
+
+    if (action === "accept") {
+      await pool.query(
+        `update connections set status='accepted', updated_at=now() where requester_id=$1 and addressee_id=$2 and status='pending'`,
+        [requesterId, session.userId]
+      );
+      return res.status(200).json({ status: "accepted" });
+    } else {
+      await pool.query(`delete from connections where requester_id=$1 and addressee_id=$2`, [requesterId, session.userId]);
+      return res.status(200).json({ status: "rejected" });
+    }
+  } catch (e) {
+    const message = e instanceof Error ? e.message : "Unknown error";
+    if (message === "Unauthorized" || message.toLowerCase().includes("jwt")) return res.status(401).json({ error: "Unauthorized" });
+    return res.status(500).json({ error: "Server error", details: message });
+  }
+});
+
+app.delete("/api/feed/:id", async (req, res) => {
+  try {
+    const session = getSessionFromAuthHeader(req.header("authorization"));
+    const pool = getPool();
+    const postId = Number(req.params.id);
+
+    const postRes = await pool.query("select user_id from posts where id=$1", [postId]);
+    if (postRes.rows.length === 0) return res.status(404).json({ error: "Not found" });
+    if (Number(postRes.rows[0].user_id) !== Number(session.userId)) return res.status(403).json({ error: "Forbidden" });
+
+    await pool.query("delete from post_likes where post_id=$1", [postId]);
+    await pool.query("delete from post_saves where post_id=$1", [postId]);
+    await pool.query("delete from posts where id=$1 and user_id=$2", [postId, session.userId]);
+
+    return res.status(200).json({ success: true });
+  } catch (e) {
+    const message = e instanceof Error ? e.message : "Unknown error";
+    if (message === "Unauthorized" || message.toLowerCase().includes("jwt")) return res.status(401).json({ error: "Unauthorized" });
+    return res.status(500).json({ error: "Server error", details: message });
+  }
+});
+
+const port = Number(process.env.API_PORT || 8787);
+app.listen(port, () => {
+  // eslint-disable-next-line no-console
+  console.log(`API listening on http://localhost:${port}`);
 });

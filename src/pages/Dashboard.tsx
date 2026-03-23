@@ -1,6 +1,7 @@
 import Header from "@/components/Header";
-import { useMemo, useState } from "react";
+import { useMemo, useState, useCallback, useEffect } from "react";
 import { getAuthUser } from "@/lib/auth";
+import { toast } from "sonner";
 import {
   CalendarDays,
   Home,
@@ -9,20 +10,63 @@ import {
   Trophy,
   MapPin,
   Bookmark,
+  BookmarkCheck,
   BriefcaseBusiness,
   MonitorPlay,
   Search,
   Plus,
+  Heart,
+  Trash2,
 } from "lucide-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { useNavigate } from "react-router-dom";
 import Avatar from "@/components/Avatar";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { apiFetch } from "@/lib/api";
-import { toast } from "sonner";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { apiFetch, type ApiError } from "@/lib/api";
+import { uploadToR2 } from "@/lib/uploads";
+
+function LinkPreview({ url }: { url: string }) {
+  const [data, setData] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch(`https://api.microlink.io?url=${encodeURIComponent(url)}`)
+      .then((res) => res.json())
+      .then((json) => {
+        if (json.status === "success") setData(json.data);
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [url]);
+
+  if (loading || !data) {
+    return (
+      <a href={url} target="_blank" rel="noreferrer" className="block mt-2 text-primary hover:underline break-all text-sm">
+        {url}
+      </a>
+    );
+  }
+
+  return (
+    <a href={url} target="_blank" rel="noreferrer" className="block mt-3 border border-border rounded-xl overflow-hidden bg-muted/30 hover:bg-muted/50 transition-colors group">
+      {data.image?.url && (
+        <div className="w-full h-48 bg-muted overflow-hidden">
+          <img src={data.image.url} alt="" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+        </div>
+      )}
+      <div className="p-3">
+        <div className="font-semibold text-sm line-clamp-1 text-foreground">{data.title || url}</div>
+        {data.description && <div className="text-xs text-muted-foreground line-clamp-2 mt-1">{data.description}</div>}
+        <div className="text-[10px] text-muted-foreground mt-2 uppercase tracking-wider">{new URL(url).hostname}</div>
+      </div>
+    </a>
+  );
+}
 
 type FeedFilter = "All" | "Business" | "Events" | "Matches";
 type MobileTab = "Feed" | "Members" | "Post" | "Events" | "Profile";
+
+type ComposerKind = "Post" | "Business" | "Events" | "Matches" | "Media";
 
 type DashboardResponse = {
   me: {
@@ -40,9 +84,9 @@ type DashboardResponse = {
     id: number;
     kind: FeedFilter | "Post";
     content: string;
-    hasLiked?: boolean;
-    reactions?: Record<string, number>;
-    userReaction?: string | null;
+    mediaUrl?: string | null;
+    mediaType?: string | null;
+    mediaUrls?: string[];
     createdAt: string;
     stats: { likes: number; comments: number };
     author: {
@@ -56,334 +100,11 @@ type DashboardResponse = {
   }>;
   upcomingEvents: Array<{ id: number; title: string; startsAt: string; location: string | null; rsvpCount: number }>;
   suggested: Array<{ id: number; username: string; fullName: string | null; role: string | null; avatarUrl: string | null }>;
-  onlineNow: Array<{ id: number; username: string; fullName: string | null; avatarUrl: string | null; lastSeen: string }>;
-};
-
-const REACTION_EMOJIS: Record<string, string> = {
-  like: "👍",
-  love: "❤️",
-  haha: "😂",
-  wow: "😮",
-  sad: "😢",
-  angry: "😡"
-};
-
-const PostItem = ({ p, queryClient, filter }: { p: DashboardResponse["feed"][0], queryClient: any, filter: FeedFilter }) => {
-  const navigate = useNavigate();
-  const [showComments, setShowComments] = useState(false);
-  const [commentText, setCommentText] = useState("");
-  const [replyingTo, setReplyingTo] = useState<number | null>(null);
-  const [showReactions, setShowReactions] = useState(false);
-
-  const reactMutation = useMutation({
-    mutationFn: async (reaction: string) => {
-      if (p.userReaction === reaction) {
-        return apiFetch(`/api/feed/${p.id}/react`, { method: "DELETE" });
-      }
-      return apiFetch(`/api/feed/${p.id}/react`, { 
-        method: "POST", 
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ reaction })
-      });
-    },
-    onMutate: async (reaction: string) => {
-      await queryClient.cancelQueries({ queryKey: ["dashboard"] });
-      queryClient.setQueryData(["dashboard", filter], (old: any) => {
-        if (!old) return old;
-        return {
-          ...old,
-          feed: old.feed.map((post: any) => {
-            if (post.id === p.id) {
-              const prevReaction = post.userReaction;
-              const isToggleOff = prevReaction === reaction;
-              const newReaction = isToggleOff ? null : reaction;
-              
-              const newReactions = { ...(post.reactions || {}) };
-              if (prevReaction) {
-                newReactions[prevReaction] = Math.max(0, (newReactions[prevReaction] || 1) - 1);
-              }
-              if (!isToggleOff) {
-                newReactions[reaction] = (newReactions[reaction] || 0) + 1;
-              }
-              
-              return { 
-                ...post, 
-                userReaction: newReaction,
-                reactions: newReactions,
-                stats: {
-                  ...post.stats,
-                  likes: Object.values(newReactions).reduce((a: any, b: any) => a + b, 0)
-                }
-              };
-            }
-            return post;
-          })
-        };
-      });
-    },
-    onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: ["dashboard"] });
-    }
-  });
-
-  const handleReactionClick = (reaction: string) => {
-    setShowReactions(false);
-    reactMutation.mutate(reaction);
-  };
-
-  const commentMutation = useMutation({
-    mutationFn: async ({ parentId }: { parentId?: number } = {}) => {
-      if (!commentText.trim()) return;
-      return apiFetch(`/api/feed/${p.id}/comment`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: commentText, parentId }),
-      });
-    },
-    onSuccess: () => {
-      setCommentText("");
-      setReplyingTo(null);
-      queryClient.invalidateQueries({ queryKey: ["dashboard"] });
-      queryClient.invalidateQueries({ queryKey: ["comments", p.id] });
-    }
-  });
-
-  const commentsQuery = useQuery({
-    queryKey: ["comments", p.id],
-    queryFn: () => apiFetch<{ comments: any[] }>(`/api/feed/${p.id}/comments`),
-    enabled: showComments,
-  });
-
-  const handleShare = async () => {
-    const url = `${window.location.origin}/dashboard?post=${p.id}`;
-    if (navigator.share) {
-      try {
-        await navigator.share({ title: "Sports Lounge Post", url });
-      } catch (e) {
-        // user cancelled or error
-      }
-    } else {
-      navigator.clipboard.writeText(url);
-      alert("Link copied to clipboard!");
-    }
-  };
-
-  const authorName = p.author.fullName || p.author.username || "Member";
-  const authorRole = p.author.role || (p.author.company ? `Member • ${p.author.company}` : "Member");
-  const when = new Date(p.createdAt).toLocaleString();
-
-  const organizeComments = (comments: any[]) => {
-    const map = new Map<number, any>();
-    const roots: any[] = [];
-    comments.forEach(c => map.set(c.id, { ...c, replies: [] }));
-    comments.forEach(c => {
-      if (c.parentId) {
-        const parent = map.get(c.parentId);
-        if (parent) parent.replies.push(map.get(c.id));
-      } else {
-        roots.push(map.get(c.id));
-      }
-    });
-    return roots;
-  };
-
-  const nestedComments = commentsQuery.data?.comments ? organizeComments(commentsQuery.data.comments) : [];
-
-  const CommentNode = ({ comment, isReply = false }: { comment: any, isReply?: boolean }) => {
-    return (
-      <div className={`flex gap-3 ${isReply ? 'mt-3 ms-2' : ''}`}>
-        <Avatar seed={comment.author.fullName || comment.author.username} name={comment.author.fullName || comment.author.username} src={comment.author.avatarUrl || undefined} className="h-8 w-8" />
-        <div className="flex-1">
-          <div className="bg-background rounded-b-lg rounded-tr-lg p-3 text-sm border border-border">
-            <div className="font-semibold">{comment.author.fullName || comment.author.username}</div>
-            <div className="mt-1">{comment.content}</div>
-          </div>
-          <div className="flex items-center gap-3 mt-1 ms-1 text-xs text-muted-foreground">
-            <button 
-              className="hover:text-foreground font-medium transition-colors"
-              onClick={() => {
-                setReplyingTo(comment.id);
-                setCommentText("");
-              }}
-            >
-              Reply
-            </button>
-            <span>{new Date(comment.createdAt).toLocaleTimeString([], { hour: '2-digit', minute:'2-digit' })}</span>
-          </div>
-          
-          {replyingTo === comment.id && (
-            <div className="mt-2 mb-3 flex gap-2">
-              <input 
-                type="text" 
-                autoFocus
-                value={commentText}
-                onChange={(e) => setCommentText(e.target.value)}
-                placeholder={`Reply to ${comment.author.fullName || comment.author.username}...`} 
-                className="flex-1 text-sm bg-background border border-border rounded-lg px-3 py-1.5 outline-none focus:border-primary"
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault();
-                    commentMutation.mutate({ parentId: comment.id });
-                  }
-                }}
-              />
-              <button 
-                onClick={() => commentMutation.mutate({ parentId: comment.id })}
-                disabled={commentMutation.isPending || !commentText.trim()}
-                className="btn-primary text-xs px-3 rounded-lg disabled:opacity-50"
-              >
-                Reply
-              </button>
-              <button 
-                onClick={() => {
-                  setReplyingTo(null);
-                  setCommentText("");
-                }}
-                className="text-muted-foreground text-xs hover:text-foreground"
-              >
-                Cancel
-              </button>
-            </div>
-          )}
-
-          {comment.replies && comment.replies.length > 0 && (
-            <div className="border-l-2 border-border/50 pl-2 ml-1">
-              {comment.replies.map((reply: any) => (
-                <CommentNode key={reply.id} comment={reply} isReply={true} />
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  };
-
-  return (
-    <div className="rounded-xl border border-border bg-card p-4">
-      <div className="flex items-start justify-between gap-3">
-        <div 
-          className="flex items-center gap-3 cursor-pointer hover:opacity-80 transition-opacity"
-          onClick={() => navigate(`/profile/${p.author.username}`)}
-        >
-          <Avatar seed={authorName} name={authorName} src={p.author.avatarUrl || undefined} className="h-10 w-10" />
-          <div>
-            <div className="font-semibold text-foreground">{authorName}</div>
-            <div className="text-xs text-muted-foreground">{authorRole}</div>
-          </div>
-        </div>
-        <div className="text-xs text-muted-foreground">{when}</div>
-      </div>
-      <div className="mt-3 text-sm text-foreground/90 whitespace-pre-line">{p.content}</div>
-      <div className="mt-4 flex items-center justify-between text-sm relative">
-        <div className="text-muted-foreground flex items-center gap-3">
-          {(p.reactions && Object.values(p.reactions).reduce((a: any, b: any) => a + b, 0) > 0) ? (
-            <div className="flex items-center gap-1.5">
-              <div className="flex -space-x-1.5 z-10">
-                {Object.entries(p.reactions)
-                  .filter(([_, count]) => (count as number) > 0)
-                  .map(([rt, count]) => (
-                  <span key={rt} className="bg-card rounded-full shadow-sm border border-border text-[10px] w-[18px] h-[18px] flex items-center justify-center relative z-10" title={`${count} ${rt}`}>
-                    {REACTION_EMOJIS[rt]}
-                  </span>
-                ))}
-              </div>
-              <span className="text-xs">{String(Object.values(p.reactions).reduce((a: any, b: any) => a + b, 0))}</span>
-            </div>
-          ) : (
-            <span className="text-xs">👍 0</span>
-          )}
-          <span className="text-xs">💬 {p.stats?.comments || 0}</span>
-        </div>
-        <div className="flex gap-2 relative">
-          <div 
-             className="relative flex items-center" 
-             onMouseEnter={() => setShowReactions(true)}
-             onMouseLeave={() => setShowReactions(false)}
-          >
-            {showReactions && (
-               <div className="absolute bottom-full left-1/2 -translate-x-1/2 pb-3 z-50 animate-in fade-in slide-in-from-bottom-2">
-                 <div className="bg-background border border-border shadow-lg rounded-[24px] px-3 py-2 flex gap-1.5">
-                   {Object.entries(REACTION_EMOJIS).map(([rt, emoji]) => (
-                     <button 
-                       key={rt} 
-                       onClick={() => handleReactionClick(rt)}
-                       className="hover:scale-125 transition-transform text-[22px] hover:-translate-y-1"
-                       title={rt}
-                     >
-                       {emoji}
-                     </button>
-                   ))}
-                 </div>
-               </div>
-            )}
-            <button 
-              onClick={() => handleReactionClick(p.userReaction || 'like')}
-              className={`px-3 py-1.5 rounded-lg border transition-all ${p.userReaction ? 'border-primary/30 bg-primary/10 text-primary font-medium shadow-sm' : 'border-border text-muted-foreground hover:bg-background hover:text-foreground'}`}>
-              <span className="flex items-center gap-1.5">
-                {p.userReaction ? REACTION_EMOJIS[p.userReaction] : <span className="opacity-70 text-base leading-none translate-y-[-1px]">👍</span>} 
-                {p.userReaction ? p.userReaction.charAt(0).toUpperCase() + p.userReaction.slice(1) : 'Like'}
-              </span>
-            </button>
-          </div>
-          <button 
-             onClick={() => setShowComments(!showComments)}
-             className="px-3 py-1.5 rounded-lg border border-border hover:bg-background transition-colors">
-            Comment
-          </button>
-          <button 
-            onClick={handleShare}
-            className="px-3 py-1.5 rounded-lg border border-border hover:bg-background transition-colors">
-            Share
-          </button>
-        </div>
-      </div>
-      {showComments && (
-        <div className="mt-4 pt-4 border-t border-border space-y-4">
-          {commentsQuery.isLoading ? (
-            <div className="text-xs text-muted-foreground">Loading comments...</div>
-          ) : nestedComments.length ? (
-            <div className="space-y-4">
-              {nestedComments.map((c: any) => (
-                <CommentNode key={c.id} comment={c} />
-              ))}
-            </div>
-          ) : (
-            <div className="text-xs text-muted-foreground">No comments yet. Be the first!</div>
-          )}
-          
-          {!replyingTo && (
-            <div className="flex gap-2 pt-2">
-              <input 
-                type="text" 
-                value={commentText}
-                onChange={(e) => setCommentText(e.target.value)}
-                placeholder="Write a comment..." 
-                className="flex-1 text-sm bg-background border border-border rounded-lg px-3 py-2 outline-none focus:border-primary"
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault();
-                    commentMutation.mutate({});
-                  }
-                }}
-              />
-              <button 
-                onClick={() => commentMutation.mutate({})}
-                disabled={commentMutation.isPending || !commentText.trim()}
-                className="btn-primary text-sm px-4 rounded-lg disabled:opacity-50"
-              >
-                Post
-              </button>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
+  onlineNow: Array<{ id: number; username: string; fullName: string | null; lastSeen: string }>;
 };
 
 const Dashboard = () => {
   const navigate = useNavigate();
-  const queryClient = useQueryClient();
   const user = useMemo(() => {
     return getAuthUser();
   }, []);
@@ -391,23 +112,54 @@ const Dashboard = () => {
   const name = user?.username || "Member";
   const [filter, setFilter] = useState<FeedFilter>("All");
   const [mobileTab, setMobileTab] = useState<MobileTab>("Feed");
-  const [postContent, setPostContent] = useState("");
+  const queryClient = useQueryClient();
 
-  const postMutation = useMutation({
-    mutationFn: async () => {
-      if (!postContent.trim()) return;
-      return apiFetch("/api/feed", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ kind: "Post", content: postContent }),
-      });
-    },
-    onSuccess: () => {
-      setPostContent("");
-      setMobileTab("Feed");
-      queryClient.invalidateQueries({ queryKey: ["dashboard"] });
-    },
-  });
+  const [composerKind, setComposerKind] = useState<ComposerKind>("Post");
+  const [composerText, setComposerText] = useState("");
+  const [composerMediaFile, setComposerMediaFile] = useState<File | null>(null);
+  const [composerMediaPreview, setComposerMediaPreview] = useState<string | null>(null);
+  const [posting, setPosting] = useState(false);
+  const [mobileComposerOpen, setMobileComposerOpen] = useState(false);
+
+  // Like / Save state maps  { postId -> boolean }
+  const [likedMap, setLikedMap] = useState<Record<number, boolean>>({});
+  const [savedMap, setSavedMap] = useState<Record<number, boolean>>({});
+  const [likeCounts, setLikeCounts] = useState<Record<number, number>>({});
+
+  const handleLike = useCallback(async (postId: number, currentCount: number) => {
+    const prev = likedMap[postId] ?? false;
+    setLikedMap((m) => ({ ...m, [postId]: !prev }));
+    setLikeCounts((m) => ({ ...m, [postId]: (m[postId] ?? currentCount) + (prev ? -1 : 1) }));
+    try {
+      const res = await apiFetch<{ liked: boolean; likeCount: number }>(`/api/feed/${postId}/like`, { method: "POST" });
+      setLikedMap((m) => ({ ...m, [postId]: res.liked }));
+      setLikeCounts((m) => ({ ...m, [postId]: res.likeCount }));
+    } catch {
+      setLikedMap((m) => ({ ...m, [postId]: prev }));
+      setLikeCounts((m) => ({ ...m, [postId]: m[postId] ?? currentCount }));
+    }
+  }, [likedMap]);
+
+  const handleSave = useCallback(async (postId: number) => {
+    const prev = savedMap[postId] ?? false;
+    setSavedMap((m) => ({ ...m, [postId]: !prev }));
+    try {
+      await apiFetch(`/api/feed/${postId}/save`, { method: "POST" });
+      toast.success(prev ? "Removed from saved" : "Saved!");
+    } catch {
+      setSavedMap((m) => ({ ...m, [postId]: prev }));
+      toast.error("Failed");
+    }
+  }, [savedMap]);
+
+  const composerServerKind: DashboardResponse["feed"][number]["kind"] =
+    composerKind === "Media" ? "Post" : composerKind;
+
+  const onSelectMediaFile = (file: File | null) => {
+    if (composerMediaPreview) URL.revokeObjectURL(composerMediaPreview);
+    setComposerMediaFile(file);
+    setComposerMediaPreview(file ? URL.createObjectURL(file) : null);
+  };
 
   const dashboardQuery = useQuery({
     queryKey: ["dashboard", filter],
@@ -417,32 +169,65 @@ const Dashboard = () => {
     },
     staleTime: 15_000,
     retry: (count, err) => {
-      const status = (err as any)?.status;
+      const status = (err as ApiError | undefined)?.status;
       if (status === 401) return false;
       return count < 2;
     },
   });
 
+  const onCreatePost = async () => {
+    const content = composerText.trim();
+    const hasText = Boolean(content);
+    const hasMedia = Boolean(composerMediaFile);
+    if (!hasText && !hasMedia) {
+      toast.error("Write something or select media before posting.");
+      return;
+    }
+    setPosting(true);
+    try {
+      let mediaUrl: string | undefined;
+      let mediaType: string | undefined;
+      if (composerMediaFile) {
+        mediaUrl = await uploadToR2(composerMediaFile, "post");
+        mediaType = composerMediaFile.type || undefined;
+      }
+
+      await apiFetch("/api/feed", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          kind: composerServerKind,
+          content,
+          ...(mediaUrl ? { mediaUrl, mediaType } : {}),
+        }),
+      });
+      setComposerText("");
+      onSelectMediaFile(null);
+      toast.success("Posted");
+      // Refresh feed for current filter.
+      queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to post");
+    } finally {
+      setPosting(false);
+    }
+  };
+
+  const onDeletePost = async (id: number) => {
+    if (!window.confirm("Are you sure you want to delete this post?")) return;
+    try {
+      await apiFetch(`/api/feed/${id}`, { method: "DELETE" });
+      toast.success("Post deleted");
+      queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to delete post");
+    }
+  };
+
   const goToFeed = () => {
     setMobileTab("Feed");
     navigate("/dashboard");
   };
-
-  const connectMutation = useMutation({
-    mutationFn: async (targetId: number) => {
-      return apiFetch("/api/connect", { 
-        method: "POST", 
-        body: JSON.stringify({ targetId }) 
-      });
-    },
-    onSuccess: () => {
-      toast.success("Connection request sent");
-      queryClient.invalidateQueries({ queryKey: ["dashboard"] });
-    },
-    onError: (err: Error) => {
-      toast.error(err.message || "Failed to connect");
-    }
-  });
 
   const nav = [
     { label: "Feed", icon: Home, href: "/dashboard" },
@@ -481,15 +266,10 @@ const Dashboard = () => {
                 <div className="mt-6 space-y-4">
                   <div className="rounded-xl border border-border bg-card p-4">
                     <div className="flex items-center gap-3">
-                      <Avatar 
-                        seed={name} 
-                        name={name} 
-                        src={dashboardQuery.data?.me?.avatarUrl || undefined} 
-                        className="h-10 w-10" 
-                      />
+                      <div className="h-10 w-10 rounded-full bg-gradient-to-br from-[#d4af37] via-[#1e346b] to-[#0b0f1a]" />
                       <div>
                         <div className="font-semibold text-foreground">{name}</div>
-                        <div className="text-xs text-muted-foreground">{dashboardQuery.data?.me?.membershipTier || "Gold"} Member</div>
+                        <div className="text-xs text-muted-foreground">Gold Member</div>
                       </div>
                     </div>
                   </div>
@@ -583,7 +363,7 @@ const Dashboard = () => {
               <div className="flex items-center gap-2 px-3 py-1.5 rounded-md border border-border bg-background">
                 <Search className="h-4 w-4 text-muted-foreground" />
                 <input
-                  className="bg-transparent text-foreground outline-none text-sm w-64"
+                  className="bg-transparent outline-none text-sm w-64"
                   placeholder="Search members, events, matches…"
                 />
               </div>
@@ -599,7 +379,7 @@ const Dashboard = () => {
               <a href="/messages" className="text-sm font-medium text-foreground/80 hover:text-foreground">
                 Messages
               </a>
-              <a href={dashboardQuery.data?.me?.username ? `/profile/${dashboardQuery.data.me.username}` : "/profile"} className="text-sm font-medium text-foreground/80 hover:text-foreground">
+              <a href={`/profile/${dashboardQuery.data?.me?.username || ""}`} className="text-sm font-medium text-foreground/80 hover:text-foreground">
                 Profile
               </a>
             </div>
@@ -614,15 +394,18 @@ const Dashboard = () => {
             {/* Left sidebar */}
             <aside className="hidden lg:block space-y-4 lg:h-full lg:min-h-0 lg:overflow-y-auto lg:overscroll-contain lg:pr-2 lg:no-scrollbar">
               <div className="rounded-xl border border-border bg-card p-4">
-                <div className="flex items-center gap-3">
-                  <Avatar 
-                    seed={name} 
-                    name={name} 
-                    src={dashboardQuery.data?.me?.avatarUrl || undefined} 
-                    className="h-10 w-10" 
+                <div 
+                  className="flex items-center gap-3 cursor-pointer hover:opacity-80 transition-opacity"
+                  onClick={() => navigate(`/profile/${dashboardQuery.data?.me?.username || name}`)}
+                >
+                  <Avatar
+                    seed={dashboardQuery.data?.me?.username || name}
+                    src={dashboardQuery.data?.me?.avatarUrl}
+                    name={dashboardQuery.data?.me?.fullName || name}
+                    className="h-10 w-10 rounded-full"
                   />
                   <div>
-                    <div className="font-semibold text-foreground">{name}</div>
+                    <div className="font-semibold text-foreground truncate max-w-[120px]">{name}</div>
                     <div className="text-xs text-muted-foreground">
                       {dashboardQuery.data?.me?.membershipTier || "Gold"} Member
                     </div>
@@ -716,52 +499,33 @@ const Dashboard = () => {
                             ? "Profile"
                             : "Create Post"}
                     </div>
-                    {mobileTab === "Post" ? (
-                      <div className="mt-4">
-                        <textarea
-                          value={postContent}
-                          onChange={(e) => setPostContent(e.target.value)}
-                          className="w-full min-h-[120px] resize-none rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-primary mb-3"
-                          placeholder="What's happening?"
-                        />
-                        <button
-                          onClick={() => postMutation.mutate()}
-                          disabled={postMutation.isPending || !postContent.trim()}
-                          className="w-full btn-primary text-sm py-2 px-4 flex items-center justify-center gap-2 disabled:opacity-50"
-                        >
-                          <Plus className="h-4 w-4" />
-                          {postMutation.isPending ? "Posting..." : "Post"}
-                        </button>
-                      </div>
-                    ) : (
-                      <>
-                        <div className="text-sm text-muted-foreground mt-2">
-                          {mobileTab === "Members"
-                            ? "Search members and connect."
-                            : mobileTab === "Events"
-                              ? "Browse upcoming events and RSVP."
-                              : "Your member profile (coming next)."}
-                        </div>
-                        {mobileTab === "Members" ? (
-                          <button
-                            type="button"
-                            onClick={() => navigate("/members")}
-                            className="mt-4 btn-primary text-sm py-2 px-4"
-                          >
-                            Open Members Network
-                          </button>
-                        ) : null}
-                        {mobileTab === "Profile" ? (
-                          <button
-                            type="button"
-                            onClick={() => navigate("/profile")}
-                            className="mt-4 btn-primary text-sm py-2 px-4"
-                          >
-                            Open Profile
-                          </button>
-                        ) : null}
-                      </>
-                    )}
+                    <div className="text-sm text-muted-foreground mt-2">
+                      {mobileTab === "Members"
+                        ? "Search members and connect."
+                        : mobileTab === "Events"
+                          ? "Browse upcoming events and RSVP."
+                          : mobileTab === "Profile"
+                            ? "Your member profile (coming next)."
+                            : "Create a post (coming next)."}
+                    </div>
+                    {mobileTab === "Members" ? (
+                      <button
+                        type="button"
+                        onClick={() => navigate("/members")}
+                        className="mt-4 btn-primary text-sm py-2 px-4"
+                      >
+                        Open Members Network
+                      </button>
+                    ) : null}
+                    {mobileTab === "Profile" ? (
+                      <button
+                        type="button"
+                        onClick={() => navigate("/profile")}
+                        className="mt-4 btn-primary text-sm py-2 px-4"
+                      >
+                        Open Profile
+                      </button>
+                    ) : null}
                   </div>
                 )}
               </div>
@@ -772,7 +536,7 @@ const Dashboard = () => {
                   <div className="h-9 w-9 rounded-full bg-gradient-to-br from-[#1e346b] to-[#d4af37]" />
                   <button
                     type="button"
-                    onClick={() => setMobileTab("Post")}
+                    onClick={() => setMobileComposerOpen(true)}
                     className="flex-1 text-left text-sm text-muted-foreground border border-border rounded-full px-4 py-2 bg-background hover:bg-card transition-colors"
                   >
                     What’s happening?
@@ -780,21 +544,106 @@ const Dashboard = () => {
                 </div>
                 <div className="flex items-center justify-between mt-3 px-1">
                   {[
-                    { label: "📝", sr: "Post" },
-                    { label: "🤝", sr: "Business" },
-                    { label: "📅", sr: "Event" },
-                    { label: "📸", sr: "Media" },
+                    { label: "📝", sr: "Post", kind: "Post" as const },
+                    { label: "🤝", sr: "Business", kind: "Business" as const },
+                    { label: "📅", sr: "Event", kind: "Events" as const },
+                    { label: "📸", sr: "Media", kind: "Media" as const },
                   ].map((i) => (
                     <button
                       key={i.sr}
                       type="button"
+                      onClick={() => {
+                        setComposerKind(i.kind);
+                        setMobileComposerOpen(true);
+                      }}
+                      aria-pressed={composerKind === i.kind}
+                      disabled={posting}
                       className="h-10 w-16 rounded-xl border border-border bg-background text-base hover:bg-card transition-colors"
                     >
                       <span className="sr-only">{i.sr}</span>
-                      {i.label}
+                      <span
+                        className={
+                          composerKind === i.kind
+                            ? "inline-flex items-center justify-center opacity-100"
+                            : "inline-flex items-center justify-center opacity-85"
+                        }
+                      >
+                        {i.label}
+                      </span>
                     </button>
                   ))}
                 </div>
+
+                {mobileComposerOpen ? (
+                  <div className="mt-4 space-y-3">
+                    <textarea
+                      value={composerText}
+                      onChange={(e) => setComposerText(e.target.value)}
+                      className="w-full min-h-[72px] resize-none rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-primary"
+                      placeholder="Share an update…"
+                    />
+                    {composerKind === "Media" ? (
+                      <div className="rounded-xl border border-border bg-background p-3">
+                        <div className="text-xs font-semibold text-muted-foreground">Upload photo/video</div>
+                        <div className="mt-2 flex items-center justify-between gap-3">
+                          <label className="btn-primary text-sm py-2 px-3 inline-flex items-center gap-2 cursor-pointer">
+                            <span>Choose file</span>
+                            <input
+                              type="file"
+                              accept="image/*,video/*"
+                              className="hidden"
+                              onChange={(e) => onSelectMediaFile(e.target.files?.[0] || null)}
+                            />
+                          </label>
+                          {composerMediaPreview ? (
+                            <button
+                              type="button"
+                              className="px-3 py-2 rounded-lg border border-border bg-background text-sm hover:bg-card transition-colors"
+                              onClick={() => onSelectMediaFile(null)}
+                            >
+                              Remove
+                            </button>
+                          ) : null}
+                        </div>
+                        {composerMediaPreview ? (
+                          <div className="mt-3">
+                            {composerMediaFile?.type.startsWith("video") ? (
+                              <video
+                                src={composerMediaPreview}
+                                className="w-full rounded-lg border border-border"
+                                controls
+                              />
+                            ) : (
+                              <img
+                                src={composerMediaPreview}
+                                alt="Upload preview"
+                                className="w-full rounded-lg border border-border object-cover max-h-56"
+                              />
+                            )}
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
+                    <div className="flex items-center justify-between gap-3">
+                      <button
+                        type="button"
+                        onClick={() => setMobileComposerOpen(false)}
+                        disabled={posting}
+                        className="px-4 py-2 rounded-lg border border-border bg-background text-sm font-semibold disabled:opacity-50"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        onClick={onCreatePost}
+                        disabled={posting || (!composerText.trim() && !composerMediaFile)}
+                        className="btn-primary text-sm py-2 px-4 disabled:opacity-50"
+                      >
+                        {posting ? "Posting..." : "Post"}
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
               </div>
 
               {/* Desktop: full create post */}
@@ -806,29 +655,81 @@ const Dashboard = () => {
                       What’s happening, <span className="text-foreground font-medium">{name}</span>?
                     </div>
                     <textarea
-                      value={postContent}
-                      onChange={(e) => setPostContent(e.target.value)}
                       className="w-full min-h-[96px] resize-none rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-primary"
+                      value={composerText}
+                      onChange={(e) => setComposerText(e.target.value)}
                       placeholder="Share an update, a business opportunity, or match plans…"
                     />
+                    {composerKind === "Media" ? (
+                      <div className="mt-3 rounded-xl border border-border bg-background p-3">
+                        <div className="text-xs font-semibold text-muted-foreground">Upload photo/video</div>
+                        <div className="mt-2 flex items-center justify-between gap-3">
+                          <label className="btn-primary text-sm py-2 px-3 inline-flex items-center gap-2 cursor-pointer">
+                            <span>Choose file</span>
+                            <input
+                              type="file"
+                              accept="image/*,video/*"
+                              className="hidden"
+                              onChange={(e) => onSelectMediaFile(e.target.files?.[0] || null)}
+                            />
+                          </label>
+                          {composerMediaPreview ? (
+                            <button
+                              type="button"
+                              className="px-3 py-2 rounded-lg border border-border bg-background text-sm hover:bg-card transition-colors"
+                              onClick={() => onSelectMediaFile(null)}
+                            >
+                              Remove
+                            </button>
+                          ) : null}
+                        </div>
+                        {composerMediaPreview ? (
+                          <div className="mt-3">
+                            {composerMediaFile?.type.startsWith("video") ? (
+                              <video src={composerMediaPreview} className="w-full rounded-lg border border-border" controls />
+                            ) : (
+                              <img
+                                src={composerMediaPreview}
+                                alt="Upload preview"
+                                className="w-full rounded-lg border border-border object-cover max-h-56"
+                              />
+                            )}
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
                     <div className="flex flex-wrap items-center justify-between gap-3 mt-3">
                       <div className="flex flex-wrap gap-2">
-                        {(["Post", "Business", "Event", "Media"] as const).map((t) => (
+                        {[
+                          { label: "📝 Post", kind: "Post" as const },
+                          { label: "🤝 Business", kind: "Business" as const },
+                          { label: "📅 Event", kind: "Events" as const },
+                          { label: "📸 Media", kind: "Media" as const },
+                        ].map((t) => (
                           <button
-                            key={t}
-                            className="px-3 py-1.5 rounded-full border border-border text-xs font-medium hover:bg-background transition-colors"
+                            key={t.label}
+                            type="button"
+                            onClick={() => setComposerKind(t.kind)}
+                            aria-pressed={composerKind === t.kind}
+                            disabled={posting}
+                            className={
+                              composerKind === t.kind
+                                ? "px-3 py-1.5 rounded-full border border-slate-900 bg-slate-900 text-xs font-medium text-white"
+                                : "px-3 py-1.5 rounded-full border border-border text-xs font-medium hover:bg-background transition-colors"
+                            }
                           >
-                            {t === "Post" ? "📝 Post" : t === "Business" ? "🤝 Business" : t === "Event" ? "📅 Event" : "📸 Media"}
+                            {t.label}
                           </button>
                         ))}
                       </div>
-                      <button 
-                        onClick={() => postMutation.mutate()}
-                        disabled={postMutation.isPending || !postContent.trim()}
+                      <button
+                        type="button"
+                        onClick={onCreatePost}
+                        disabled={posting || (!composerText.trim() && !composerMediaFile)}
                         className="btn-primary text-sm py-2 px-4 inline-flex items-center gap-2 disabled:opacity-50"
                       >
                         <Plus className="h-4 w-4" />
-                        {postMutation.isPending ? "Posting..." : "Post"}
+                        {posting ? "Posting..." : "Post"}
                       </button>
                     </div>
                   </div>
@@ -857,16 +758,141 @@ const Dashboard = () => {
                 </div>
               ) : dashboardQuery.isError ? (
                 <div className="rounded-xl border border-border bg-card p-4 text-sm text-muted-foreground">
-                  Failed to load dashboard. {(dashboardQuery.error as any)?.message || "Please try again."}
+                  Failed to load dashboard.{" "}
+                  {dashboardQuery.error instanceof Error ? dashboardQuery.error.message : "Please try again."}
                 </div>
               ) : !dashboardQuery.data?.feed?.length ? (
                 <div className="rounded-xl border border-border bg-card p-4 text-sm text-muted-foreground">
                   No posts yet. Be the first to share an update.
                 </div>
               ) : (
-                dashboardQuery.data.feed.map((p) => (
-                  <PostItem key={p.id} p={p} queryClient={queryClient} filter={filter} />
-                ))
+                dashboardQuery.data.feed.map((p) => {
+                  const authorName = p.author.fullName || p.author.username || "Member";
+                  const authorRole = p.author.role || (p.author.company ? `Member • ${p.author.company}` : "Member");
+                  const when = new Date(p.createdAt).toLocaleString();
+                  const allMedia = (p.mediaUrls && p.mediaUrls.length > 0) ? p.mediaUrls : (p.mediaUrl ? [p.mediaUrl] : []);
+                  const isLiked = likedMap[p.id] ?? false;
+                  const isSaved = savedMap[p.id] ?? false;
+                  const likeCount = likeCounts[p.id] ?? p.stats.likes;
+                  return (
+                    <div key={p.id} className="rounded-xl border border-border bg-card p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-center gap-3">
+                          <Avatar seed={authorName} name={authorName} src={p.author.avatarUrl || undefined} className="h-10 w-10" />
+                          <div>
+                            <div className="font-semibold text-foreground">{authorName}</div>
+                            <div className="text-xs text-muted-foreground">{authorRole}</div>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <div className="text-xs text-muted-foreground">{when}</div>
+                          {p.author.id === dashboardQuery.data?.me?.id && (
+                            <button
+                              onClick={() => onDeletePost(p.id)}
+                              className="p-1.5 rounded-lg text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-all"
+                              title="Delete Post"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          )}
+                          <button
+                            onClick={() => handleSave(p.id)}
+                            className={`p-1.5 rounded-lg transition-colors ${isSaved ? "text-amber-500" : "text-muted-foreground hover:text-foreground"}`}
+                          >
+                            {isSaved ? <BookmarkCheck className="h-4 w-4" /> : <Bookmark className="h-4 w-4" />}
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Multi-photo grid */}
+                      {allMedia.length > 0 && (
+                        <div className={`mt-3 rounded-lg overflow-hidden grid gap-0.5 ${
+                          allMedia.length === 1 ? "" :
+                          allMedia.length === 2 ? "grid-cols-2" :
+                          "grid-cols-2"
+                        }`}>
+                          {allMedia.slice(0, 4).map((url, idx) => (
+                            <div
+                              key={idx}
+                              className={`relative bg-muted ${
+                                allMedia.length === 3 && idx === 0 ? "row-span-2" :
+                                allMedia.length === 1 ? "" : ""
+                              }`}
+                            >
+                              {p.mediaType?.startsWith("video") ? (
+                                <video src={url} className="w-full h-full object-contain" controls />
+                              ) : (
+                                <img
+                                  src={url}
+                                  alt=""
+                                  className={`w-full object-contain ${
+                                    allMedia.length === 1 ? "max-h-[480px]" : "h-48"
+                                  }`}
+                                />
+                              )}
+                              {idx === 3 && allMedia.length > 4 && (
+                                <div className="absolute inset-0 bg-black/50 flex items-center justify-center text-white font-bold text-2xl">
+                                  +{allMedia.length - 4}
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {p.content ? (
+                        <div className="mt-3 text-sm text-foreground/90 whitespace-pre-line">
+                          {(() => {
+                            const urlRegex = /(https?:\/\/[^\s]+)/g;
+                            const parts = p.content.split(urlRegex);
+                            const matches = p.content.match(urlRegex) || [];
+                            const firstUrl = matches[0];
+                            return (
+                              <>
+                                <div>
+                                  {parts.map((part, i) => {
+                                    if (part.match(urlRegex)) {
+                                      return (
+                                        <a key={i} href={part} target="_blank" rel="noreferrer" className="text-primary hover:underline font-medium">
+                                          {part}
+                                        </a>
+                                      );
+                                    }
+                                    return <span key={i}>{part}</span>;
+                                  })}
+                                </div>
+                                {firstUrl && allMedia.length === 0 && <LinkPreview url={firstUrl} />}
+                              </>
+                            );
+                          })()}
+                        </div>
+                      ) : null}
+
+                      {/* Reaction bar */}
+                      <div className="mt-4 flex items-center justify-between text-sm border-t border-border/50 pt-3">
+                        <div className="text-muted-foreground text-xs">
+                          👍 {likeCount} &nbsp; 💬 {p.stats.comments}
+                        </div>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => handleLike(p.id, p.stats.likes)}
+                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
+                              isLiked
+                                ? "bg-blue-50 text-blue-600 border-blue-200 dark:bg-blue-900/30 dark:text-blue-400 dark:border-blue-800"
+                                : "border-border hover:bg-background"
+                            }`}
+                          >
+                            <Heart className={`h-3.5 w-3.5 ${isLiked ? "fill-current" : ""}`} />
+                            {isLiked ? "Liked" : "Like"}
+                          </button>
+                          <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border hover:bg-background text-xs font-medium transition-colors">
+                            💬 Comment
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
               )}
             </main>
 
@@ -906,22 +932,15 @@ const Dashboard = () => {
                       const display = m.fullName || m.username || "Member";
                       return (
                         <div key={m.id} className="flex items-center justify-between gap-3">
-                          <div 
-                            className="flex items-center gap-3 cursor-pointer hover:opacity-80 transition-opacity"
-                            onClick={() => navigate(`/profile/${m.username}`)}
-                          >
+                          <div className="flex items-center gap-3">
                             <Avatar seed={display} name={display} src={m.avatarUrl || undefined} className="h-9 w-9" />
                             <div>
                               <div className="text-sm font-semibold text-foreground">{display}</div>
                               <div className="text-xs text-muted-foreground">{m.role || "Member"}</div>
                             </div>
                           </div>
-                          <button 
-                            onClick={() => connectMutation.mutate(m.id)}
-                            disabled={connectMutation.isPending}
-                            className="px-3 py-1.5 rounded-lg border border-border text-sm hover:bg-background transition-colors disabled:opacity-50"
-                          >
-                            {connectMutation.isPending ? "..." : "Connect"}
+                          <button className="px-3 py-1.5 rounded-lg border border-border text-sm hover:bg-background transition-colors">
+                            Connect
                           </button>
                         </div>
                       );
@@ -938,25 +957,10 @@ const Dashboard = () => {
                   {dashboardQuery.isLoading ? (
                     <div className="text-sm text-muted-foreground">Loading…</div>
                   ) : dashboardQuery.data?.onlineNow?.length ? (
-                    dashboardQuery.data.onlineNow.slice(0, 12).map((n) => (
-                      <div
-                        key={n.id}
-                        className="flex items-center gap-3 cursor-pointer hover:opacity-80 transition-opacity"
-                        onClick={() => navigate(`/profile/${n.username}`)}
-                      >
-                        <div className="relative">
-                          <Avatar
-                            seed={n.username}
-                            name={n.fullName || n.username}
-                            src={n.avatarUrl || undefined}
-                            className="h-8 w-8"
-                          />
-                          <span className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-emerald-500 border-2 border-card" />
-                        </div>
-                        <div className="flex flex-col">
-                          <span className="text-sm font-medium text-foreground leading-none">{n.fullName || n.username}</span>
-                          <span className="text-[10px] text-muted-foreground mt-0.5">Active now</span>
-                        </div>
+                    dashboardQuery.data.onlineNow.slice(0, 8).map((n) => (
+                      <div key={n.id} className="flex items-center gap-2">
+                        <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                        <span>{n.fullName || n.username}</span>
                       </div>
                     ))
                   ) : (

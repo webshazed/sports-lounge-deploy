@@ -10,7 +10,12 @@ function getUrl(req: IncomingMessage) {
   return new URL(path, `${proto}://${host}`);
 }
 
-type CreatePostBody = { kind?: "Post" | "Business" | "Events" | "Matches"; content?: string };
+type CreatePostBody = {
+  kind?: "Post" | "Business" | "Events" | "Matches";
+  content?: string;
+  mediaUrl?: string;
+  mediaType?: string; // e.g. "image/png" or "video/mp4"
+};
 
 export default async function handler(req: IncomingMessage, res: ServerResponse) {
   if (req.method !== "GET" && req.method !== "POST") {
@@ -27,15 +32,18 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
       const body = await readJson<CreatePostBody>(req);
       const kind = (body.kind || "Post").trim() as CreatePostBody["kind"];
       const content = (body.content || "").trim();
-      if (!content) return sendJson(res, 400, { error: "Content required" });
+      const mediaUrl = (body.mediaUrl || "").trim() || null;
+      const mediaType = (body.mediaType || "").trim() || null;
+      if (!content && !mediaUrl) return sendJson(res, 400, { error: "Content or media required" });
       if (!["Post", "Business", "Events", "Matches"].includes(kind || "")) {
         return sendJson(res, 400, { error: "Invalid kind" });
       }
 
       const inserted = await pool.query(
-        `insert into posts (user_id, kind, content) values ($1,$2,$3)
-         returning id, kind, content, like_count, comment_count, created_at`,
-        [session.userId, kind, content]
+        `insert into posts (user_id, kind, content, media_url, media_type)
+         values ($1,$2,$3,$4,$5)
+         returning id, kind, content, like_count, comment_count, created_at, media_url, media_type`,
+        [session.userId, kind, content || "", mediaUrl, mediaType]
       );
       return sendJson(res, 201, { post: inserted.rows[0] });
     }
@@ -58,15 +66,11 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
         p.id,
         p.kind,
         p.content,
+        p.like_count,
         p.comment_count,
-        (
-          select coalesce(jsonb_object_agg(reaction_type, cnt), '{}'::jsonb)
-          from (
-            select reaction_type, count(*)::int as cnt from post_likes pl where pl.post_id = p.id group by reaction_type
-          ) sub
-        ) as reactions,
-        (select reaction_type from post_likes pl where pl.post_id = p.id and pl.user_id = $1) as user_reaction,
         p.created_at,
+        p.media_url,
+        p.media_type,
         u.id as user_id,
         u.username,
         pr.full_name,
@@ -80,17 +84,17 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
       order by p.created_at desc
       limit ${limit}
       `,
-      [session.userId, ...params]
+      params
     );
 
     const posts = result.rows.map((r) => ({
       id: r.id,
       kind: r.kind,
       content: r.content,
-      reactions: r.reactions,
-      userReaction: r.user_reaction || null,
-      stats: { comments: r.comment_count },
+      stats: { likes: r.like_count, comments: r.comment_count },
       createdAt: r.created_at,
+      mediaUrl: r.media_url,
+      mediaType: r.media_type,
       author: {
         id: r.user_id,
         username: r.username,

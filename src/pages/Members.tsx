@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { getAuthUser } from "@/lib/auth";
 import Avatar from "@/components/Avatar";
+import { Trophy, MapPin, Briefcase } from "lucide-react";
 
 type Member = {
   id: number;
@@ -72,7 +73,45 @@ const Members = () => {
     const t = setTimeout(async () => {
       try {
         const result = await fetchMembers({ q, industry, location, sport, lookingFor });
-        if (!cancelled) setMembers(result.members);
+        if (!cancelled) {
+          // Fetch current user details for suggestions logic
+          let myProfile: any = null;
+          try {
+             const token = getToken();
+             const meRes = await fetch("/api/me", { headers: { Authorization: `Bearer ${token}` } });
+             if (meRes.ok) {
+                const meData = await meRes.json();
+                myProfile = meData.profile;
+             }
+          } catch(e) {}
+
+          const sorted = result.members.sort((a, b) => {
+             if (a.id === me?.id) return 1;
+             if (b.id === me?.id) return -1;
+             
+             let scoreA = 0;
+             let scoreB = 0;
+
+             if (myProfile) {
+                const mySports = (myProfile.favoriteSports || "").toLowerCase().split(",").map((s:any) => s.trim());
+                const aSports = (a.favoriteSports || "").toLowerCase().split(",").map((s:any) => s.trim());
+                const bSports = (b.favoriteSports || "").toLowerCase().split(",").map((s:any) => s.trim());
+                
+                scoreA += aSports.filter(s => s && mySports.includes(s)).length * 5;
+                scoreB += bSports.filter(s => s && mySports.includes(s)).length * 5;
+
+                if (a.industry && myProfile.industry && a.industry === myProfile.industry) scoreA += 3;
+                if (b.industry && myProfile.industry && b.industry === myProfile.industry) scoreB += 3;
+
+                if (a.location && myProfile.location && a.location === myProfile.location) scoreA += 2;
+                if (b.location && myProfile.location && b.location === myProfile.location) scoreB += 2;
+             }
+
+             return scoreB - scoreA;
+          });
+
+          setMembers(sorted);
+        }
       } catch (e) {
         if (!cancelled) toast.error(e instanceof Error ? e.message : "Failed to load members");
       } finally {
@@ -84,7 +123,7 @@ const Members = () => {
       cancelled = true;
       clearTimeout(t);
     };
-  }, [q, industry, location, sport, lookingFor]);
+  }, [q, industry, location, sport, lookingFor, me?.id]);
 
   return (
     <div className="theme-light min-h-screen bg-background text-foreground">
@@ -155,11 +194,12 @@ const Members = () => {
           </div>
         </div>
 
-        {/* Smart suggestions (MVP placeholder) */}
-        <div className="mt-6 rounded-2xl border border-border bg-card p-5">
-          <div className="font-semibold text-foreground">People you should meet</div>
-          <div className="text-sm text-muted-foreground mt-1">
-            Coming next: smart suggestions based on shared interests + events + mutuals.
+        {/* Smart suggestions (Sorted by similarity) */}
+        <div className="mt-8 flex items-center justify-between">
+          <div className="font-semibold text-xl text-foreground">Recommended Connections</div>
+          <div className="text-sm text-muted-foreground flex items-center gap-1">
+             <Trophy className="h-4 w-4 text-amber-500" />
+             Based on shared interests
           </div>
         </div>
 

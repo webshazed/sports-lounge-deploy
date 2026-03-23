@@ -69,21 +69,6 @@ export async function ensureSchema() {
       avatar_url text,
       membership_tier text not null default 'Gold',
       location text,
-      phone text,
-      dob text,
-      gender text,
-      about_you text,
-      privacy_settings jsonb not null default '{"phone":"only_me","email":"only_me","dob":"only_me","username":"only_me"}',
-      reg_type text,
-      pl_team text,
-      world_team text,
-      address_line1 text,
-      address_line2 text,
-      city text,
-      zip_code text,
-      country text,
-      biz_type text,
-      biz_name text,
       updated_at timestamptz not null default now()
     );
   `);
@@ -95,21 +80,6 @@ export async function ensureSchema() {
   await p.query(`alter table profiles add column if not exists cover_image_url text;`);
   await p.query(`alter table profiles add column if not exists avatar_url text;`);
   await p.query(`alter table users add column if not exists last_seen timestamptz not null default now();`);
-  await p.query(`alter table profiles add column if not exists phone text;`);
-  await p.query(`alter table profiles add column if not exists dob text;`);
-  await p.query(`alter table profiles add column if not exists gender text;`);
-  await p.query(`alter table profiles add column if not exists about_you text;`);
-  await p.query(`alter table profiles add column if not exists privacy_settings jsonb not null default '{"phone":"only_me","email":"only_me","dob":"only_me","username":"only_me"}';`);
-  await p.query(`alter table profiles add column if not exists pl_team text;`);
-  await p.query(`alter table profiles add column if not exists world_team text;`);
-  await p.query(`alter table profiles add column if not exists address_line1 text;`);
-  await p.query(`alter table profiles add column if not exists address_line2 text;`);
-  await p.query(`alter table profiles add column if not exists city text;`);
-  await p.query(`alter table profiles add column if not exists zip_code text;`);
-  await p.query(`alter table profiles add column if not exists country text;`);
-  await p.query(`alter table profiles add column if not exists biz_type text;`);
-  await p.query(`alter table profiles add column if not exists biz_name text;`);
-  await p.query(`alter table profiles add column if not exists reg_type text;`);
 
   await p.query(`
     create table if not exists lounge_bookings (
@@ -136,35 +106,17 @@ export async function ensureSchema() {
       content text not null,
       like_count int not null default 0,
       comment_count int not null default 0,
+      media_url text,
+      media_type text,
       created_at timestamptz not null default now()
     );
   `);
   await p.query(`create index if not exists posts_created_at_idx on posts (created_at desc);`);
   await p.query(`create index if not exists posts_user_created_at_idx on posts (user_id, created_at desc);`);
 
-  await p.query(`
-    create table if not exists post_likes (
-      user_id bigint not null references users(id) on delete cascade,
-      post_id bigint not null references posts(id) on delete cascade,
-      reaction_type text not null default 'like',
-      created_at timestamptz not null default now(),
-      primary key (user_id, post_id)
-    );
-  `);
-  await p.query(`alter table post_likes add column if not exists reaction_type text not null default 'like';`);
-
-  await p.query(`
-    create table if not exists post_comments (
-      id bigserial primary key,
-      user_id bigint not null references users(id) on delete cascade,
-      post_id bigint not null references posts(id) on delete cascade,
-      parent_id bigint references post_comments(id) on delete cascade,
-      content text not null,
-      created_at timestamptz not null default now()
-    );
-  `);
-  await p.query(`create index if not exists post_comments_post_id_idx on post_comments (post_id, created_at asc);`);
-  await p.query(`alter table post_comments add column if not exists parent_id bigint references post_comments(id) on delete cascade;`);
+  // Backwards-compatible column adds
+  await p.query(`alter table posts add column if not exists media_url text;`);
+  await p.query(`alter table posts add column if not exists media_type text;`);
 
   await p.query(`
     create table if not exists events (
@@ -179,19 +131,17 @@ export async function ensureSchema() {
   `);
   await p.query(`create index if not exists events_starts_at_idx on events (starts_at asc);`);
 
+  // ── Event RSVPs ───────────────────────────────────────────────
   await p.query(`
-    create table if not exists connections (
-      id bigserial primary key,
-      requester_id bigint not null references users(id) on delete cascade,
-      receiver_id bigint not null references users(id) on delete cascade,
-      status text not null default 'pending', -- 'pending', 'accepted', 'rejected'
+    create table if not exists event_rsvps (
+      user_id bigint not null references users(id) on delete cascade,
+      event_id bigint not null references events(id) on delete cascade,
       created_at timestamptz not null default now(),
-      unique(requester_id, receiver_id)
+      primary key (user_id, event_id)
     );
   `);
-  await p.query(`create index if not exists connections_receiver_idx on connections (receiver_id, status);`);
-  await p.query(`create index if not exists connections_pair_idx on connections (requester_id, receiver_id);`);
 
+  // ── Messages (persist DMs) ────────────────────────────────────
   await p.query(`
     create table if not exists messages (
       id bigserial primary key,
@@ -202,7 +152,87 @@ export async function ensureSchema() {
       created_at timestamptz not null default now()
     );
   `);
-  await p.query(`create index if not exists messages_conversation_idx on messages (sender_id, receiver_id, created_at desc);`);
-  await p.query(`create index if not exists messages_receiver_unread_idx on messages (receiver_id) where read_at is null;`);
+  await p.query(`create index if not exists messages_convo_idx on messages (least(sender_id,receiver_id), greatest(sender_id,receiver_id), created_at desc);`);
+
+  // ── Post Likes ────────────────────────────────────────────────
+  await p.query(`
+    create table if not exists post_likes (
+      user_id bigint not null references users(id) on delete cascade,
+      post_id bigint not null references posts(id) on delete cascade,
+      created_at timestamptz not null default now(),
+      primary key (user_id, post_id)
+    );
+  `);
+
+  // ── Post Saves (bookmarks) ────────────────────────────────────
+  await p.query(`
+    create table if not exists post_saves (
+      user_id bigint not null references users(id) on delete cascade,
+      post_id bigint not null references posts(id) on delete cascade,
+      created_at timestamptz not null default now(),
+      primary key (user_id, post_id)
+    );
+  `);
+
+  // ── Multi-photo support on posts ──────────────────────────────
+  await p.query(`alter table posts add column if not exists media_urls text[] not null default '{}';`);
+
+  // ── Live Matches ──────────────────────────────────────────────
+  await p.query(`
+    create table if not exists live_matches (
+      id bigserial primary key,
+      title text not null,
+      sport text not null default 'Football',
+      team_home text not null,
+      team_away text not null,
+      score_home int not null default 0,
+      score_away int not null default 0,
+      status text not null default 'upcoming',
+      starts_at timestamptz not null,
+      venue text,
+      watch_party_count int not null default 0,
+      created_at timestamptz not null default now()
+    );
+  `);
+  await p.query(`create index if not exists live_matches_starts_at_idx on live_matches (starts_at asc);`);
+
+  // ── Match Watch-Party RSVPs ───────────────────────────────────
+  await p.query(`
+    create table if not exists match_rsvps (
+      user_id bigint not null references users(id) on delete cascade,
+      match_id bigint not null references live_matches(id) on delete cascade,
+      created_at timestamptz not null default now(),
+      primary key (user_id, match_id)
+    );
+  `);
+
+  // ── Business Posts ────────────────────────────────────────────
+  await p.query(`
+    create table if not exists business_posts (
+      id bigserial primary key,
+      user_id bigint not null references users(id) on delete cascade,
+      category text not null default 'Opportunity',
+      title text not null,
+      description text not null,
+      contact text,
+      created_at timestamptz not null default now()
+    );
+  `);
+  await p.query(`create index if not exists business_posts_created_idx on business_posts (created_at desc);`);
+
+  // ── Connections / Friends ─────────────────────────────────────
+  await p.query(`
+    create table if not exists connections (
+      requester_id bigint not null references users(id) on delete cascade,
+      addressee_id bigint not null references users(id) on delete cascade,
+      status text not null default 'pending',
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now(),
+      primary key (requester_id, addressee_id)
+    );
+  `);
+  await p.query(`create index if not exists connections_addressee_idx on connections (addressee_id, status);`);
+  await p.query(`create index if not exists connections_requester_idx on connections (requester_id, status);`);
 }
+
 

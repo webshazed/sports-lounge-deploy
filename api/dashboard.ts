@@ -65,15 +65,11 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
         p.id,
         p.kind,
         p.content,
+        p.like_count,
         p.comment_count,
-        (
-          select coalesce(jsonb_object_agg(reaction_type, cnt), '{}'::jsonb)
-          from (
-            select reaction_type, count(*)::int as cnt from post_likes pl where pl.post_id = p.id group by reaction_type
-          ) sub
-        ) as reactions,
-        (select reaction_type from post_likes pl where pl.post_id = p.id and pl.user_id = $1) as user_reaction,
         p.created_at,
+        p.media_url,
+        p.media_type,
         u.id as user_id,
         u.username,
         pr.full_name,
@@ -87,16 +83,16 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
       order by p.created_at desc
       limit ${feedLimit}
       `,
-      [session.userId, ...feedParams]
+      feedParams
     );
     const feed = feedRes.rows.map((r) => ({
       id: r.id,
       kind: r.kind,
       content: r.content,
-      reactions: r.reactions,
-      userReaction: r.user_reaction || null,
       createdAt: r.created_at,
-      stats: { comments: r.comment_count },
+      stats: { likes: r.like_count, comments: r.comment_count },
+      mediaUrl: r.media_url,
+      mediaType: r.media_type,
       author: {
         id: r.user_id,
         username: r.username,
@@ -145,7 +141,7 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
 
     const onlineRes = await pool.query(
       `
-      select u.id, u.username, u.last_seen, p.full_name, p.avatar_url
+      select u.id, u.username, u.last_seen, p.full_name
       from users u
       left join profiles p on p.user_id = u.id
       where u.last_seen >= (now() - interval '15 minutes')
@@ -157,7 +153,6 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
       id: r.id,
       username: r.username,
       fullName: r.full_name,
-      avatarUrl: r.avatar_url,
       lastSeen: r.last_seen,
     }));
 
