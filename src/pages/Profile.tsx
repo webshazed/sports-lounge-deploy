@@ -241,11 +241,13 @@ export default function ProfilePage() {
               <img src={form.coverImageUrl} alt="Cover" className="absolute inset-0 h-full w-full object-cover" />
             )}
             <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-black/10 to-transparent" />
-            <label className="absolute top-3 right-3 inline-flex items-center gap-2 rounded-lg border border-white/30 bg-black/40 backdrop-blur px-3 py-1.5 text-xs font-semibold text-white cursor-pointer hover:bg-black/60 transition-colors">
-              <Edit3 className="h-3 w-3" />
-              <input type="file" accept="image/*" className="hidden" onChange={onUpload("cover")} />
-              {uploading === "cover" ? "Uploading…" : "Edit cover"}
-            </label>
+            {isOwnProfile && (
+              <label className="absolute top-3 right-3 inline-flex items-center gap-2 rounded-lg border border-white/30 bg-black/40 backdrop-blur px-3 py-1.5 text-xs font-semibold text-white cursor-pointer hover:bg-black/60 transition-colors">
+                <Edit3 className="h-3 w-3" />
+                <input type="file" accept="image/*" className="hidden" onChange={onUpload("cover")} />
+                {uploading === "cover" ? "Uploading…" : "Edit cover"}
+              </label>
+            )}
           </div>
 
           {/* Profile info row */}
@@ -259,10 +261,12 @@ export default function ProfilePage() {
                     name={form.fullName || profileUsername}
                     className="h-20 w-20 sm:h-28 sm:w-28 rounded-2xl shadow-lg border-4 border-card"
                   />
-                  <label className="absolute -bottom-1 -right-1 h-7 w-7 rounded-full bg-primary text-white flex items-center justify-center cursor-pointer hover:brightness-110 transition-all shadow-md">
-                    <Edit3 className="h-3 w-3" />
-                    <input type="file" accept="image/*" className="hidden" onChange={onUpload("avatar")} />
-                  </label>
+                  {isOwnProfile && (
+                    <label className="absolute -bottom-1 -right-1 h-7 w-7 rounded-full bg-primary text-white flex items-center justify-center cursor-pointer hover:brightness-110 transition-all shadow-md">
+                      <Edit3 className="h-3 w-3" />
+                      <input type="file" accept="image/*" className="hidden" onChange={onUpload("avatar")} />
+                    </label>
+                  )}
                   {uploading === "avatar" && (
                     <div className="absolute inset-0 rounded-2xl bg-black/40 flex items-center justify-center text-white text-xs">…</div>
                   )}
@@ -515,112 +519,191 @@ export default function ProfilePage() {
 
               {/* About / Edit tab */}
               {tab === "About" && (
-                <form onSubmit={onSave} className="space-y-6">
-                  <div className="rounded-2xl border border-border bg-card p-6">
-                    <div className="flex items-center justify-between gap-3 mb-6">
-                      <div>
-                        <div className="font-semibold text-foreground">Profile Details</div>
-                        <div className="text-sm text-muted-foreground mt-1">Keep your profile premium and up to date.</div>
+                isOwnProfile ? (
+                  <form onSubmit={onSave} className="space-y-6">
+                    <div className="rounded-2xl border border-border bg-card p-6">
+                      <div className="flex items-center justify-between gap-3 mb-6">
+                        <div>
+                          <div className="font-semibold text-foreground">Profile Details</div>
+                          <div className="text-sm text-muted-foreground mt-1">Keep your profile premium and up to date.</div>
+                        </div>
+                        <button type="submit" disabled={saving} className="btn-primary text-sm py-2 px-5">
+                          {saving ? "Saving…" : "Save Changes"}
+                        </button>
                       </div>
-                      <button type="submit" disabled={saving} className="btn-primary text-sm py-2 px-5">
-                        {saving ? "Saving…" : "Save Changes"}
-                      </button>
-                    </div>
 
-                    <div className="grid sm:grid-cols-2 gap-4">
-                      <div>
-                        <label className={labelClass}>Username</label>
-                        <div className="relative">
-                           <User className="absolute left-3 top-3.5 h-4 w-4 text-muted-foreground" />
-                           <input className={`${inputClass} pl-10`} value={form.username} onChange={(e) => onChange("username")(e.target.value)} placeholder="username" />
+                      <div className="grid sm:grid-cols-2 gap-4">
+                        <div>
+                          <label className={labelClass}>Username</label>
+                          <div className="relative">
+                            <User className="absolute left-3 top-3.5 h-4 w-4 text-muted-foreground" />
+                            <input className={`${inputClass} pl-10`} value={form.username} onChange={(e) => onChange("username")(e.target.value)} placeholder="username" />
+                          </div>
+                        </div>
+                        <div>
+                          <label className={labelClass}>Email address</label>
+                          <div className="relative">
+                            <Mail className="absolute left-3 top-3.5 h-4 w-4 text-muted-foreground" />
+                            <input className={`${inputClass} pl-10`} value={form.email} onChange={(e) => onChange("email")(e.target.value)} placeholder="email@example.com" />
+                          </div>
+                        </div>
+                        <div>
+                          <label className={labelClass}>Full name</label>
+                          <input className={inputClass} value={form.fullName} onChange={(e) => onChange("fullName")(e.target.value)} placeholder="Your name" />
+                        </div>
+                        <div>
+                          <label className={labelClass}>Role</label>
+                          <input className={inputClass} value={form.role} onChange={(e) => onChange("role")(e.target.value)} placeholder="Entrepreneur / Investor / Athlete…" />
+                        </div>
+                        <div>
+                          <label className={labelClass}>Company</label>
+                          <input className={inputClass} value={form.company} onChange={(e) => onChange("company")(e.target.value)} placeholder="Company (optional)" />
+                        </div>
+                        <div>
+                          <label className={labelClass}>Industry</label>
+                          <input className={inputClass} value={form.industry} onChange={(e) => onChange("industry")(e.target.value)} placeholder="Sports tech / Finance / Media…" />
+                        </div>
+                        <div>
+                          <label className={labelClass}>Location</label>
+                          <input className={inputClass} value={form.location} onChange={(e) => onChange("location")(e.target.value)} placeholder="London" />
+                        </div>
+                        <div>
+                          <label className={labelClass}>Membership tier</label>
+                          <select className={inputClass} value={form.membershipTier} onChange={(e) => onChange("membershipTier")(e.target.value)}>
+                            <option value="Gold">Gold</option>
+                            <option value="Elite">Elite</option>
+                            <option value="Founding Member">Founding Member</option>
+                          </select>
                         </div>
                       </div>
-                      <div>
-                        <label className={labelClass}>Email address</label>
-                        <div className="relative">
-                           <Mail className="absolute left-3 top-3.5 h-4 w-4 text-muted-foreground" />
-                           <input className={`${inputClass} pl-10`} value={form.email} onChange={(e) => onChange("email")(e.target.value)} placeholder="email@example.com" />
+
+                      <div className="mt-4">
+                        <label className={labelClass}>Bio</label>
+                        <textarea className={`${inputClass} min-h-[110px] resize-none`} value={form.bio} onChange={(e) => onChange("bio")(e.target.value)} placeholder="Who you are + what you're looking for (keep it premium)." />
+                      </div>
+
+                      <div className="mt-4 grid sm:grid-cols-2 gap-4">
+                        <div>
+                          <label className={labelClass}>Favorite sports</label>
+                          <input className={inputClass} value={form.favoriteSports} onChange={(e) => onChange("favoriteSports")(e.target.value)} placeholder="Football, Tennis, Boxing…" />
+                        </div>
+                        <div>
+                          <label className={labelClass}>Business interests</label>
+                          <input className={inputClass} value={form.businessInterests} onChange={(e) => onChange("businessInterests")(e.target.value)} placeholder="Investing, partnerships, hiring…" />
                         </div>
                       </div>
-                      <div>
-                        <label className={labelClass}>Full name</label>
-                        <input className={inputClass} value={form.fullName} onChange={(e) => onChange("fullName")(e.target.value)} placeholder="Your name" />
-                      </div>
-                      <div>
-                        <label className={labelClass}>Role</label>
-                        <input className={inputClass} value={form.role} onChange={(e) => onChange("role")(e.target.value)} placeholder="Entrepreneur / Investor / Athlete…" />
-                      </div>
-                      <div>
-                        <label className={labelClass}>Company</label>
-                        <input className={inputClass} value={form.company} onChange={(e) => onChange("company")(e.target.value)} placeholder="Company (optional)" />
-                      </div>
-                      <div>
-                        <label className={labelClass}>Industry</label>
-                        <input className={inputClass} value={form.industry} onChange={(e) => onChange("industry")(e.target.value)} placeholder="Sports tech / Finance / Media…" />
-                      </div>
-                      <div>
-                        <label className={labelClass}>Location</label>
-                        <input className={inputClass} value={form.location} onChange={(e) => onChange("location")(e.target.value)} placeholder="London" />
-                      </div>
-                      <div>
-                        <label className={labelClass}>Membership tier</label>
-                        <select className={inputClass} value={form.membershipTier} onChange={(e) => onChange("membershipTier")(e.target.value)}>
-                          <option value="Gold">Gold</option>
-                          <option value="Elite">Elite</option>
-                          <option value="Founding Member">Founding Member</option>
-                        </select>
+                    </div>
+
+                    <div className="rounded-2xl border border-border bg-card p-6">
+                      <div className="font-semibold text-foreground mb-1">Looking For</div>
+                      <div className="text-sm text-muted-foreground mb-4">This makes networking intentional — your secret weapon.</div>
+                      <div className="flex flex-wrap gap-2">
+                        {LOOKING_FOR_OPTIONS.map((o) => {
+                          const selected = form.lookingFor.includes(o);
+                          return (
+                            <button key={o} type="button" onClick={toggleListValue("lookingFor", o)}
+                              className={`px-4 py-2 rounded-full text-sm font-semibold border transition-colors ${selected ? "bg-slate-900 text-white border-slate-900" : "bg-background text-foreground border-border hover:bg-card"}`}>
+                              {o}
+                            </button>
+                          );
+                        })}
                       </div>
                     </div>
 
-                    <div className="mt-4">
-                      <label className={labelClass}>Bio</label>
-                      <textarea className={`${inputClass} min-h-[110px] resize-none`} value={form.bio} onChange={(e) => onChange("bio")(e.target.value)} placeholder="Who you are + what you're looking for (keep it premium)." />
+                    <div className="rounded-2xl border border-border bg-card p-6">
+                      <div className="font-semibold text-foreground mb-1">Badges</div>
+                      <div className="text-sm text-muted-foreground mb-4">Add social proof to stand out.</div>
+                      <div className="flex flex-wrap gap-2">
+                        {BADGE_OPTIONS.map((o) => {
+                          const selected = form.badges.includes(o);
+                          return (
+                            <button key={o} type="button" onClick={toggleListValue("badges", o)}
+                              className={`px-4 py-2 rounded-full text-sm font-semibold border transition-colors ${selected ? "bg-amber-500 text-white border-amber-500" : "bg-background text-foreground border-border hover:bg-card"}`}>
+                              🏆 {o}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </form>
+                ) : (
+                  <div className="space-y-6">
+                    <div className="rounded-2xl border border-border bg-card p-6 shadow-sm">
+                      <div className="font-bold text-foreground mb-6 text-xl border-b border-border pb-3">About {form.fullName || profileUsername}</div>
+                      
+                      <div className="grid sm:grid-cols-2 gap-y-8 gap-x-12">
+                        <div className="space-y-1">
+                          <label className="text-[10px] uppercase tracking-wider font-bold text-muted-foreground/70 block">Full Name</label>
+                          <div className="text-foreground font-semibold text-base">{form.fullName || "Not specified"}</div>
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[10px] uppercase tracking-wider font-bold text-muted-foreground/70 block">Current Role</label>
+                          <div className="text-foreground font-semibold text-base">{form.role || "Not specified"}</div>
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[10px] uppercase tracking-wider font-bold text-muted-foreground/70 block">Company / Organization</label>
+                          <div className="text-foreground font-semibold text-base">{form.company || "Not specified"}</div>
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[10px] uppercase tracking-wider font-bold text-muted-foreground/70 block">Industry Focus</label>
+                          <div className="text-foreground font-semibold text-base">{form.industry || "Not specified"}</div>
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[10px] uppercase tracking-wider font-bold text-muted-foreground/70 block">Location</label>
+                          <div className="text-foreground font-semibold text-base">{form.location || "Not specified"}</div>
+                        </div>
+                         <div className="space-y-1">
+                          <label className="text-[10px] uppercase tracking-wider font-bold text-muted-foreground/70 block">Membership Status</label>
+                          <div className="text-foreground font-semibold text-base">{form.membershipTier} Member</div>
+                        </div>
+                      </div>
+
+                      <div className="mt-10 pt-8 border-t border-border">
+                        <label className="text-[10px] uppercase tracking-wider font-bold text-muted-foreground/70 block mb-3">Professional Bio</label>
+                        <div className="text-foreground leading-relaxed whitespace-pre-wrap text-sm italic border-l-2 border-primary/20 pl-4 bg-muted/30 py-3 rounded-r-lg">
+                          {form.bio || "This member hasn't provided a bio yet."}
+                        </div>
+                      </div>
+
+                      <div className="mt-10 grid sm:grid-cols-2 gap-y-8 gap-x-12">
+                        <div className="space-y-1">
+                          <label className="text-[10px] uppercase tracking-wider font-bold text-muted-foreground/70 block">Favorite Sports</label>
+                          <div className="text-foreground font-semibold text-sm">{form.favoriteSports || "Not specified"}</div>
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[10px] uppercase tracking-wider font-bold text-muted-foreground/70 block">Business Interests</label>
+                          <div className="text-foreground font-semibold text-sm">{form.businessInterests || "Not specified"}</div>
+                        </div>
+                      </div>
                     </div>
 
-                    <div className="mt-4 grid sm:grid-cols-2 gap-4">
-                      <div>
-                        <label className={labelClass}>Favorite sports</label>
-                        <input className={inputClass} value={form.favoriteSports} onChange={(e) => onChange("favoriteSports")(e.target.value)} placeholder="Football, Tennis, Boxing…" />
+                    <div className="rounded-2xl border border-border bg-card p-6 shadow-sm">
+                      <div className="font-bold text-foreground mb-4 text-sm uppercase tracking-widest text-muted-foreground/80">Looking For</div>
+                      <div className="flex flex-wrap gap-2">
+                        {form.lookingFor.length > 0 ? form.lookingFor.map((o) => (
+                           <span key={o} className="px-5 py-2 rounded-xl text-xs font-bold bg-slate-900 text-white border border-slate-900 shadow-sm transition-transform hover:scale-105">
+                             {o}
+                           </span>
+                        )) : (
+                          <div className="text-sm text-muted-foreground italic bg-muted px-4 py-2 rounded-lg">No specific requirements listed</div>
+                        )}
                       </div>
-                      <div>
-                        <label className={labelClass}>Business interests</label>
-                        <input className={inputClass} value={form.businessInterests} onChange={(e) => onChange("businessInterests")(e.target.value)} placeholder="Investing, partnerships, hiring…" />
+                    </div>
+
+                    <div className="rounded-2xl border border-border bg-card p-6 shadow-sm">
+                      <div className="font-bold text-foreground mb-4 text-sm uppercase tracking-widest text-muted-foreground/80">Expertise & Badges</div>
+                      <div className="flex flex-wrap gap-2">
+                        {form.badges.length > 0 ? form.badges.map((o) => (
+                           <span key={o} className="px-5 py-2 rounded-xl text-xs font-bold bg-amber-500 text-white border border-amber-500 shadow-sm transition-transform hover:scale-105">
+                             🏆 {o}
+                           </span>
+                        )) : (
+                          <div className="text-sm text-muted-foreground italic bg-muted px-4 py-2 rounded-lg">No badges or special recognition yet</div>
+                        )}
                       </div>
                     </div>
                   </div>
-
-                  <div className="rounded-2xl border border-border bg-card p-6">
-                    <div className="font-semibold text-foreground mb-1">Looking For</div>
-                    <div className="text-sm text-muted-foreground mb-4">This makes networking intentional — your secret weapon.</div>
-                    <div className="flex flex-wrap gap-2">
-                      {LOOKING_FOR_OPTIONS.map((o) => {
-                        const selected = form.lookingFor.includes(o);
-                        return (
-                          <button key={o} type="button" onClick={toggleListValue("lookingFor", o)}
-                            className={`px-4 py-2 rounded-full text-sm font-semibold border transition-colors ${selected ? "bg-slate-900 text-white border-slate-900" : "bg-background text-foreground border-border hover:bg-card"}`}>
-                            {o}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  <div className="rounded-2xl border border-border bg-card p-6">
-                    <div className="font-semibold text-foreground mb-1">Badges</div>
-                    <div className="text-sm text-muted-foreground mb-4">Add social proof to stand out.</div>
-                    <div className="flex flex-wrap gap-2">
-                      {BADGE_OPTIONS.map((o) => {
-                        const selected = form.badges.includes(o);
-                        return (
-                          <button key={o} type="button" onClick={toggleListValue("badges", o)}
-                            className={`px-4 py-2 rounded-full text-sm font-semibold border transition-colors ${selected ? "bg-amber-500 text-white border-amber-500" : "bg-background text-foreground border-border hover:bg-card"}`}>
-                            🏆 {o}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                </form>
+                )
               )}
             </div>
 

@@ -1186,7 +1186,25 @@ app.get("/api/profile/:username", async (req, res) => {
     );
     const p = profileRes.rows[0] || {};
     const postCount = (await pool.query(`select count(*)::int as c from posts where user_id=$1`, [u.id])).rows[0]?.c || 0;
-    return res.status(200).json({ user: { id: u.id, username: u.username }, profile: p, postCount });
+    return res.status(200).json({
+      user: { id: u.id, username: u.username },
+      profile: {
+        fullName: p.full_name || "",
+        role: p.role || "",
+        company: p.company || "",
+        bio: p.bio || "",
+        industry: p.industry || "",
+        favoriteSports: p.favorite_sports || "",
+        businessInterests: p.business_interests || "",
+        lookingFor: Array.isArray(p.looking_for) ? p.looking_for : [],
+        badges: Array.isArray(p.badges) ? p.badges : [],
+        coverImageUrl: p.cover_image_url || "",
+        avatarUrl: p.avatar_url || "",
+        membershipTier: p.membership_tier || "Gold",
+        location: p.location || "",
+      },
+      postCount,
+    });
   } catch (e) {
     const message = e instanceof Error ? e.message : "Unknown error";
     if (message === "Unauthorized" || message.toLowerCase().includes("jwt")) return res.status(401).json({ error: "Unauthorized" });
