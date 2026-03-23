@@ -1,5 +1,7 @@
 import "dotenv/config";
 import express from "express";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { registerUser, signInUser } from "../api/_lib/auth";
 import { ensureSchema, getPool } from "../api/_lib/db";
 import { getSessionFromAuthHeader } from "../api/_lib/session";
@@ -7,8 +9,12 @@ import { PutObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { buildPublicUrl, getBucket, getR2Client } from "../api/_lib/r2";
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
 const app = express();
 app.use(express.json());
+app.use(express.static(path.join(__dirname, "../dist")));
 
 app.post("/api/register", async (req, res) => {
   try {
@@ -1429,8 +1435,12 @@ app.delete("/api/feed/:id", async (req, res) => {
   }
 });
 
-const port = Number(process.env.API_PORT || 8787);
-app.listen(port, () => {
+app.get("*", (_req: express.Request, res: express.Response) => {
+  res.sendFile(path.join(__dirname, "../dist/index.html"));
+});
+
+const port = Number(process.env.PORT || process.env.API_PORT || 8787);
+app.listen(port, "0.0.0.0", () => {
   // eslint-disable-next-line no-console
-  console.log(`API listening on http://localhost:${port}`);
+  console.log(`API listening on http://0.0.0.0:${port}`);
 });
