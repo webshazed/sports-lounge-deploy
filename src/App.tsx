@@ -11,7 +11,9 @@ import Partners from "./pages/Partners.tsx";
 import Register from "./pages/Register.tsx";
 import SignIn from "./pages/SignIn.tsx";
 import Dashboard from "./pages/Dashboard.tsx";
+import Membership from "./pages/Membership.tsx";
 import RequireAuth from "@/components/RequireAuth";
+import RequireSubscription from "@/components/RequireSubscription";
 import Profile from "./pages/Profile";
 import Members from "./pages/Members";
 import BookTable from "./pages/lounge/BookTable";
@@ -24,6 +26,19 @@ import Leaderboard from "./pages/Leaderboard";
 import Lounges from "./pages/Lounges";
 import Saved from "./pages/Saved";
 import NotFound from "./pages/NotFound.tsx";
+import { useSessionGuard } from "@/hooks/useSessionGuard";
+import SessionWarning from "@/components/SessionWarning";
+
+/** Wrapper that mounts the session guard (must be inside BrowserRouter) */
+function SessionGuardWrapper({ children }: { children: React.ReactNode }) {
+  const session = useSessionGuard();
+  return (
+    <>
+      {children}
+      <SessionWarning {...session} />
+    </>
+  );
+}
 
 const queryClient = new QueryClient();
 
@@ -33,13 +48,32 @@ const App = () => (
       <Toaster />
       <Sonner />
       <BrowserRouter>
+        <SessionGuardWrapper>
         <Routes>
           <Route path="/" element={<Index />} />
+          <Route path="/contact" element={<Contact />} />
+          <Route path="/partners" element={<Partners />} />
+          <Route path="/signin" element={<SignIn />} />
+          <Route path="/register" element={<Register />} />
+
+          {/* Membership page — requires auth but NOT subscription */}
+          <Route
+            path="/membership"
+            element={
+              <RequireAuth>
+                <Membership />
+              </RequireAuth>
+            }
+          />
+
+          {/* All social platform routes — require auth + active subscription */}
           <Route
             path="/online"
             element={
               <RequireAuth>
-                <OnlineNow />
+                <RequireSubscription>
+                  <OnlineNow />
+                </RequireSubscription>
               </RequireAuth>
             }
           />
@@ -47,19 +81,19 @@ const App = () => (
             path="/messages"
             element={
               <RequireAuth>
-                <Messages />
+                <RequireSubscription>
+                  <Messages />
+                </RequireSubscription>
               </RequireAuth>
             }
           />
-          <Route path="/contact" element={<Contact />} />
-          <Route path="/partners" element={<Partners />} />
-          <Route path="/signin" element={<SignIn />} />
-          <Route path="/register" element={<Register />} />
           <Route
             path="/dashboard"
             element={
               <RequireAuth>
-                <Dashboard />
+                <RequireSubscription>
+                  <Dashboard />
+                </RequireSubscription>
               </RequireAuth>
             }
           />
@@ -67,7 +101,9 @@ const App = () => (
             path="/profile"
             element={
               <RequireAuth>
-                <Profile />
+                <RequireSubscription>
+                  <Profile />
+                </RequireSubscription>
               </RequireAuth>
             }
           />
@@ -75,7 +111,9 @@ const App = () => (
             path="/profile/:username"
             element={
               <RequireAuth>
-                <Profile />
+                <RequireSubscription>
+                  <Profile />
+                </RequireSubscription>
               </RequireAuth>
             }
           />
@@ -83,7 +121,9 @@ const App = () => (
             path="/members"
             element={
               <RequireAuth>
-                <Members />
+                <RequireSubscription>
+                  <Members />
+                </RequireSubscription>
               </RequireAuth>
             }
           />
@@ -91,7 +131,9 @@ const App = () => (
             path="/lounge/book"
             element={
               <RequireAuth>
-                <BookTable />
+                <RequireSubscription>
+                  <BookTable />
+                </RequireSubscription>
               </RequireAuth>
             }
           />
@@ -99,7 +141,9 @@ const App = () => (
             path="/lounge/matches"
             element={
               <RequireAuth>
-                <MatchSchedule />
+                <RequireSubscription>
+                  <MatchSchedule />
+                </RequireSubscription>
               </RequireAuth>
             }
           />
@@ -107,7 +151,9 @@ const App = () => (
             path="/lounge/perks"
             element={
               <RequireAuth>
-                <MemberPerks />
+                <RequireSubscription>
+                  <MemberPerks />
+                </RequireSubscription>
               </RequireAuth>
             }
           />
@@ -116,7 +162,9 @@ const App = () => (
             path="/events"
             element={
               <RequireAuth>
-                <Events />
+                <RequireSubscription>
+                  <Events />
+                </RequireSubscription>
               </RequireAuth>
             }
           />
@@ -124,7 +172,9 @@ const App = () => (
             path="/matches"
             element={
               <RequireAuth>
-                <LiveMatches />
+                <RequireSubscription>
+                  <LiveMatches />
+                </RequireSubscription>
               </RequireAuth>
             }
           />
@@ -132,7 +182,9 @@ const App = () => (
             path="/business"
             element={
               <RequireAuth>
-                <BusinessHub />
+                <RequireSubscription>
+                  <BusinessHub />
+                </RequireSubscription>
               </RequireAuth>
             }
           />
@@ -140,7 +192,9 @@ const App = () => (
             path="/leaderboard"
             element={
               <RequireAuth>
-                <Leaderboard />
+                <RequireSubscription>
+                  <Leaderboard />
+                </RequireSubscription>
               </RequireAuth>
             }
           />
@@ -148,7 +202,9 @@ const App = () => (
             path="/lounges"
             element={
               <RequireAuth>
-                <Lounges />
+                <RequireSubscription>
+                  <Lounges />
+                </RequireSubscription>
               </RequireAuth>
             }
           />
@@ -156,13 +212,16 @@ const App = () => (
             path="/saved"
             element={
               <RequireAuth>
-                <Saved />
+                <RequireSubscription>
+                  <Saved />
+                </RequireSubscription>
               </RequireAuth>
             }
           />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
           <Route path="*" element={<NotFound />} />
         </Routes>
+        </SessionGuardWrapper>
       </BrowserRouter>
     </TooltipProvider>
   </QueryClientProvider>

@@ -27,8 +27,8 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
     const filter = (url.searchParams.get("filter") || "All").trim() as FeedFilter;
     const feedLimitRaw = Number(url.searchParams.get("feedLimit") || "20");
     const feedLimit = Math.max(1, Math.min(50, Number.isFinite(feedLimitRaw) ? feedLimitRaw : 20));
-    const sideLimitRaw = Number(url.searchParams.get("sideLimit") || "2");
-    const sideLimit = Math.max(1, Math.min(10, Number.isFinite(sideLimitRaw) ? sideLimitRaw : 2));
+    const sideLimitRaw = Number(url.searchParams.get("sideLimit") || "4");
+    const sideLimit = Math.max(1, Math.min(10, Number.isFinite(sideLimitRaw) ? sideLimitRaw : 4));
 
     const meRes = await pool.query(`select id, email, username from users where id = $1 limit 1`, [
       session.userId,

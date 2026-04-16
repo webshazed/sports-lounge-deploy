@@ -2,9 +2,17 @@ import "dotenv/config";
 import express from "express";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import jwt from "jsonwebtoken";
 import { registerUser, signInUser } from "../api/_lib/auth";
 import { ensureSchema, getPool } from "../api/_lib/db";
 import { getSessionFromAuthHeader } from "../api/_lib/session";
+
+function getJwtSecret() {
+  const secret = process.env.JWT_SECRET;
+  if (secret) return secret;
+  if (process.env.NODE_ENV !== "production") return "dev-insecure-secret";
+  throw new Error("Missing JWT_SECRET env var");
+}
 import { PutObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { buildPublicUrl, getBucket, getR2Client } from "../api/_lib/r2";
@@ -18,15 +26,29 @@ app.use(express.static(path.join(__dirname, "../dist")));
 
 app.post("/api/register", async (req, res) => {
   try {
-    const { email, username, password } = req.body as {
-      email?: string;
-      username?: string;
-      password?: string;
-    };
+    const body = req.body || {};
     const result = await registerUser({
-      email: email || "",
-      username: username || "",
-      password: password || "",
+      email: body.email || "",
+      username: body.username || "",
+      password: body.password || "",
+      firstName: body.firstName,
+      lastName: body.lastName,
+      phone: body.phone,
+      dob: body.dob,
+      gender: body.gender,
+      aboutYou: body.aboutYou,
+      regType: body.regType,
+      favoriteSports: body.favoriteSports,
+      membershipType: body.membershipType,
+      plTeam: body.plTeam,
+      worldTeam: body.worldTeam,
+      addressLine1: body.addressLine1,
+      addressLine2: body.addressLine2,
+      city: body.city,
+      zipCode: body.zipCode,
+      country: body.country,
+      bizType: body.bizType,
+      bizName: body.bizName,
     });
     return res.status(201).json(result);
   } catch (e) {
@@ -66,6 +88,219 @@ app.post("/api/signin", async (req, res) => {
     if (message === "Invalid input") return res.status(400).json({ error: "Invalid input" });
     if (message === "Invalid credentials") {
       return res.status(401).json({ error: "Invalid credentials" });
+    }
+    return res.status(500).json({ error: "Server error", details: message });
+  }
+});
+
+// ─── Stripe Checkout ─────────────────────────────────
+app.post("/api/checkout", async (req, res) => {
+  try {
+    await ensureSchema();
+    const session = getSessionFromAuthHeader(req.header("authorization"));
+    const pool = getPool();
+    const { getStripe, PLANS } = await import("../api/_lib/stripe");
+    type PlanType = keyof typeof PLANS;
+    const planType = (req.body?.planType || "individual") as PlanType;
+
+    if (!PLANS[planType]) {
+      return res.status(400).json({ error: "Invalid plan type" });
+    }
+
+    const plan = PLANS[planType];
+    const stripe = getStripe();
+
+    // Get user email
+    const userRes = await pool.query(`select email from users where id=$1`, [session.userId]);
+    const email = userRes.rows[0]?.email;
+
+    // Create or reuse Stripe Customer
+    let customerId: string | undefined;
+    const subRes = await pool.query(
+      `select stripe_customer_id from subscriptions where user_id=$1 and stripe_customer_id is not null limit 1`,
+      [session.userId]
+    );
+    if (subRes.rows[0]?.stripe_customer_id) {
+      customerId = subRes.rows[0].stripe_customer_id;
+    } else {
+      const customer = await stripe.customers.create({
+        email,
+        metadata: { userId: String(session.userId) },
+      });
+      customerId = customer.id;
+    }
+
+    const origin = req.headers.origin || req.headers.referer?.replace(/\/$/, "") || "http://localhost:5173";
+
+    const checkoutSession = await stripe.checkout.sessions.create({
+      customer: customerId,
+      mode: "subscription",
+      line_items: [
+        {
+          price_data: {
+            currency: "gbp",
+            product_data: { name: plan.name, description: plan.description },
+            unit_amount: plan.price,
+            recurring: { interval: plan.interval },
+          },
+          quantity: 1,
+        },
+      ],
+      metadata: { userId: String(session.userId), planType },
+      success_url: `${origin}/membership?status=success`,
+      cancel_url: `${origin}/membership?status=cancelled`,
+    });
+
+    return res.status(200).json({ sessionUrl: checkoutSession.url });
+  } catch (e) {
+    const message = e instanceof Error ? e.message : "Unknown error";
+    if (message === "Unauthorized" || message.toLowerCase().includes("jwt")) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    return res.status(500).json({ error: "Server error", details: message });
+  }
+});
+
+// ─── Subscription Status ─────────────────────────────
+app.get("/api/subscription", async (req, res) => {
+  try {
+    await ensureSchema();
+    const session = getSessionFromAuthHeader(req.header("authorization"));
+    const pool = getPool();
+
+    const subRes = await pool.query(
+      `select id, plan_type, price_amount, status, stripe_subscription_id, current_period_end, created_at
+       from subscriptions where user_id = $1 order by created_at desc limit 1`,
+      [session.userId]
+    );
+
+    const sub = subRes.rows[0];
+    const profRes = await pool.query(`select reg_type from profiles where user_id=$1`, [session.userId]);
+    const regType = profRes.rows[0]?.reg_type || "individual";
+
+    if (!sub) {
+      return res.status(200).json({ subscription: null, regType });
+    }
+
+    return res.status(200).json({
+      subscription: {
+        id: sub.id,
+        planType: sub.plan_type,
+        priceAmount: sub.price_amount,
+        status: sub.status,
+        stripeSubscriptionId: sub.stripe_subscription_id,
+        currentPeriodEnd: sub.current_period_end,
+        createdAt: sub.created_at,
+      },
+      regType,
+    });
+  } catch (e) {
+    const message = e instanceof Error ? e.message : "Unknown error";
+    if (message === "Unauthorized" || message.toLowerCase().includes("jwt")) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    return res.status(500).json({ error: "Server error", details: message });
+  }
+});
+
+// ─── Stripe Webhook ──────────────────────────────────
+app.post("/api/webhook", express.raw({ type: "application/json" }), async (req, res) => {
+  try {
+    await ensureSchema();
+    const pool = getPool();
+    const { getStripe } = await import("../api/_lib/stripe");
+    const stripe = getStripe();
+
+    let event;
+    const sig = req.headers["stripe-signature"];
+    const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+
+    if (webhookSecret && sig) {
+      const rawBody = typeof req.body === "string" ? req.body : req.body.toString();
+      event = stripe.webhooks.constructEvent(rawBody, sig as string, webhookSecret);
+    } else {
+      event = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
+    }
+
+    switch (event.type) {
+      case "checkout.session.completed": {
+        const s = event.data.object;
+        const userId = s.metadata?.userId;
+        const planType = s.metadata?.planType || "individual";
+        if (userId) {
+          const priceMap: Record<string, number> = { individual: 1999, company_small: 2999, company_medium: 3999, company_large: 4999 };
+          await pool.query(
+            `insert into subscriptions (user_id, stripe_customer_id, stripe_subscription_id, plan_type, price_amount, status, current_period_end, updated_at)
+             values ($1,$2,$3,$4,$5,'active',now()+interval '30 days',now())
+             on conflict on constraint subscriptions_pkey do nothing`,
+            [userId, s.customer, s.subscription, planType, priceMap[planType] || 1999]
+          );
+          // Also update if existing pending record
+          await pool.query(
+            `update subscriptions set stripe_customer_id=$1, stripe_subscription_id=$2, plan_type=$3, price_amount=$4, status='active', current_period_end=now()+interval '30 days', updated_at=now()
+             where user_id=$5 and status != 'active'`,
+            [s.customer, s.subscription, planType, priceMap[planType] || 1999, userId]
+          );
+        }
+        break;
+      }
+      case "customer.subscription.updated": {
+        const sub = event.data.object;
+        const status = sub.status === "active" ? "active" : sub.status === "past_due" ? "past_due" : sub.status === "canceled" ? "cancelled" : sub.status;
+        const periodEnd = sub.current_period_end ? new Date(sub.current_period_end * 1000).toISOString() : null;
+        await pool.query(`update subscriptions set status=$1, current_period_end=$2, updated_at=now() where stripe_subscription_id=$3`, [status, periodEnd, sub.id]);
+        break;
+      }
+      case "customer.subscription.deleted": {
+        const sub = event.data.object;
+        await pool.query(`update subscriptions set status='cancelled', updated_at=now() where stripe_subscription_id=$1`, [sub.id]);
+        break;
+      }
+    }
+    return res.status(200).json({ received: true });
+  } catch (e) {
+    const message = e instanceof Error ? e.message : "Unknown error";
+    console.error("Webhook error:", message);
+    return res.status(400).json({ error: "Webhook error", details: message });
+  }
+});
+
+// ─── Token Refresh ───────────────────────────────────
+app.post("/api/refresh", async (req, res) => {
+  try {
+    const session = getSessionFromAuthHeader(req.header("authorization"));
+    const pool = getPool();
+
+    // Verify user still exists
+    const userRes = await pool.query(
+      `select id, email, username from users where id = $1 limit 1`,
+      [session.userId]
+    );
+    const user = userRes.rows[0];
+    if (!user) return res.status(401).json({ error: "Unauthorized" });
+
+    // Issue a fresh token
+    const newToken = jwt.sign(
+      { sub: String(user.id), id: user.id, email: user.email, username: user.username },
+      getJwtSecret(),
+      { expiresIn: "7d" }
+    );
+
+    // Update last_seen
+    try {
+      await pool.query(`update users set last_seen = now() where id = $1`, [user.id]);
+    } catch {
+      // best-effort
+    }
+
+    return res.status(200).json({
+      token: newToken,
+      user: { id: user.id, email: user.email, username: user.username },
+    });
+  } catch (e) {
+    const message = e instanceof Error ? e.message : "Unknown error";
+    if (message === "Unauthorized" || message.toLowerCase().includes("jwt")) {
+      return res.status(401).json({ error: "Unauthorized" });
     }
     return res.status(500).json({ error: "Server error", details: message });
   }
@@ -312,7 +547,7 @@ app.get("/api/online", async (req, res) => {
 app.get("/api/events", async (req, res) => {
   try {
     await ensureSchema();
-    getSessionFromAuthHeader(req.header("authorization"));
+    const session = getSessionFromAuthHeader(req.header("authorization"));
     const pool = getPool();
     const limitRaw = Number(req.query.limit || 10);
     const limit = Math.max(1, Math.min(50, Number.isFinite(limitRaw) ? limitRaw : 10));
@@ -322,13 +557,15 @@ app.get("/api/events", async (req, res) => {
 
     const result = await pool.query(
       `
-      select id, title, starts_at, location, rsvp_count
-      from events
-      where starts_at >= $1
-      order by starts_at asc
+      select e.id, e.title, e.starts_at, e.location, e.rsvp_count,
+             case when er.user_id is not null then true else false end as my_rsvp
+      from events e
+      left join event_rsvps er on er.event_id = e.id and er.user_id = $2
+      where e.starts_at >= $1
+      order by e.starts_at asc
       limit ${limit}
       `,
-      [fromIso]
+      [fromIso, session.userId]
     );
 
     const events = result.rows.map((r) => ({
@@ -337,6 +574,7 @@ app.get("/api/events", async (req, res) => {
       startsAt: r.starts_at,
       location: r.location,
       rsvpCount: r.rsvp_count,
+      myRsvp: r.my_rsvp,
     }));
     return res.status(200).json({ events });
   } catch (e) {
@@ -517,7 +755,7 @@ app.get("/api/dashboard", async (req, res) => {
     const events = upcomingEventCountRes.rows[0]?.c || 0;
 
     const feedWhere: string[] = [];
-    const feedParams: unknown[] = [];
+    const feedParams: unknown[] = [session.userId];
     if (filter && filter !== "All") {
       feedParams.push(filter);
       feedWhere.push(`p.kind = $${feedParams.length}`);
@@ -538,10 +776,14 @@ app.get("/api/dashboard", async (req, res) => {
         pr.full_name,
         pr.role,
         pr.company,
-        pr.avatar_url
+        pr.avatar_url,
+        case when pl.user_id is not null then true else false end as my_like,
+        case when ps.user_id is not null then true else false end as my_save
       from posts p
       join users u on u.id = p.user_id
       left join profiles pr on pr.user_id = u.id
+      left join post_likes pl on pl.post_id = p.id and pl.user_id = $1
+      left join post_saves ps on ps.post_id = p.id and ps.user_id = $1
       ${feedWhere.length ? `where ${feedWhere.join(" and ")}` : ""}
       order by p.created_at desc
       limit ${feedLimit}
@@ -556,6 +798,8 @@ app.get("/api/dashboard", async (req, res) => {
       stats: { likes: r.like_count, comments: r.comment_count },
       mediaUrl: r.media_url,
       mediaType: r.media_type,
+      myLike: r.my_like,
+      mySave: r.my_save,
       author: {
         id: r.user_id,
         username: r.username,
@@ -1441,11 +1685,117 @@ app.delete("/api/feed/:id", async (req, res) => {
     if (postRes.rows.length === 0) return res.status(404).json({ error: "Not found" });
     if (Number(postRes.rows[0].user_id) !== Number(session.userId)) return res.status(403).json({ error: "Forbidden" });
 
+    await pool.query("delete from comments where post_id=$1", [postId]);
     await pool.query("delete from post_likes where post_id=$1", [postId]);
     await pool.query("delete from post_saves where post_id=$1", [postId]);
     await pool.query("delete from posts where id=$1 and user_id=$2", [postId, session.userId]);
 
     return res.status(200).json({ success: true });
+  } catch (e) {
+    const message = e instanceof Error ? e.message : "Unknown error";
+    if (message === "Unauthorized" || message.toLowerCase().includes("jwt")) return res.status(401).json({ error: "Unauthorized" });
+    return res.status(500).json({ error: "Server error", details: message });
+  }
+});
+
+// ── Comments ──────────────────────────────────────────────────────────────────
+app.get("/api/feed/:id/comments", async (req, res) => {
+  try {
+    await ensureSchema();
+    getSessionFromAuthHeader(req.header("authorization"));
+    const pool = getPool();
+    const postId = Number(req.params.id);
+    if (!postId) return res.status(400).json({ error: "Invalid post id" });
+    const result = await pool.query(
+      `select c.id, c.content, c.created_at, c.user_id,
+              u.username, p.full_name, p.avatar_url
+       from comments c
+       join users u on u.id = c.user_id
+       left join profiles p on p.user_id = u.id
+       where c.post_id = $1
+       order by c.created_at asc
+       limit 100`,
+      [postId]
+    );
+    return res.status(200).json({ comments: result.rows });
+  } catch (e) {
+    const message = e instanceof Error ? e.message : "Unknown error";
+    if (message === "Unauthorized" || message.toLowerCase().includes("jwt")) return res.status(401).json({ error: "Unauthorized" });
+    return res.status(500).json({ error: "Server error", details: message });
+  }
+});
+
+app.post("/api/feed/:id/comments", async (req, res) => {
+  try {
+    await ensureSchema();
+    const session = getSessionFromAuthHeader(req.header("authorization"));
+    const pool = getPool();
+    const postId = Number(req.params.id);
+    const content = String((req.body as any)?.content || "").trim();
+    if (!postId) return res.status(400).json({ error: "Invalid post id" });
+    if (!content) return res.status(400).json({ error: "Content required" });
+    const inserted = await pool.query(
+      `insert into comments(post_id, user_id, content) values($1,$2,$3)
+       returning id, content, created_at, user_id`,
+      [postId, session.userId, content]
+    );
+    await pool.query(`update posts set comment_count = comment_count + 1 where id=$1`, [postId]);
+    // Fetch author info
+    const userRes = await pool.query(
+      `select u.username, p.full_name, p.avatar_url from users u left join profiles p on p.user_id=u.id where u.id=$1`,
+      [session.userId]
+    );
+    const comment = { ...inserted.rows[0], ...userRes.rows[0] };
+    return res.status(201).json({ comment });
+  } catch (e) {
+    const message = e instanceof Error ? e.message : "Unknown error";
+    if (message === "Unauthorized" || message.toLowerCase().includes("jwt")) return res.status(401).json({ error: "Unauthorized" });
+    return res.status(500).json({ error: "Server error", details: message });
+  }
+});
+
+app.delete("/api/comments/:id", async (req, res) => {
+  try {
+    await ensureSchema();
+    const session = getSessionFromAuthHeader(req.header("authorization"));
+    const pool = getPool();
+    const commentId = Number(req.params.id);
+    const cRes = await pool.query(`select post_id, user_id from comments where id=$1`, [commentId]);
+    if (!cRes.rows[0]) return res.status(404).json({ error: "Not found" });
+    if (Number(cRes.rows[0].user_id) !== Number(session.userId)) return res.status(403).json({ error: "Forbidden" });
+    const postId = cRes.rows[0].post_id;
+    await pool.query(`delete from comments where id=$1`, [commentId]);
+    await pool.query(`update posts set comment_count = greatest(0, comment_count - 1) where id=$1`, [postId]);
+    return res.status(200).json({ success: true });
+  } catch (e) {
+    const message = e instanceof Error ? e.message : "Unknown error";
+    if (message === "Unauthorized" || message.toLowerCase().includes("jwt")) return res.status(401).json({ error: "Unauthorized" });
+    return res.status(500).json({ error: "Server error", details: message });
+  }
+});
+
+app.get("/api/online", async (req, res) => {
+  try {
+    await ensureSchema();
+    getSessionFromAuthHeader(req.header("authorization"));
+    const pool = getPool();
+    const result = await pool.query(`
+      select u.id, u.username, u.last_seen, p.full_name, p.avatar_url, p.role
+      from users u
+      left join profiles p on p.user_id = u.id
+      where u.last_seen >= (now() - interval '15 minutes')
+      order by u.last_seen desc
+      limit 50
+    `);
+    const users = result.rows.map((r) => ({
+      id: r.id,
+      username: r.username,
+      fullName: r.full_name,
+      avatarUrl: r.avatar_url,
+      role: r.role,
+      lastSeen: r.last_seen,
+    }));
+    return res.status(200).json({ users });
   } catch (e) {
     const message = e instanceof Error ? e.message : "Unknown error";
     if (message === "Unauthorized" || message.toLowerCase().includes("jwt")) return res.status(401).json({ error: "Unauthorized" });

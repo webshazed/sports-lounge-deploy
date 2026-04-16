@@ -1,4 +1,5 @@
 import { Pool } from "pg";
+// trigger watch reload
 
 let pool: Pool | undefined;
 let didInit = false;
@@ -39,7 +40,6 @@ export function getPool() {
 
 export async function ensureSchema() {
   if (didInit) return;
-  didInit = true;
 
   const p = getPool();
   await p.query(`
@@ -80,6 +80,22 @@ export async function ensureSchema() {
   await p.query(`alter table profiles add column if not exists cover_image_url text;`);
   await p.query(`alter table profiles add column if not exists avatar_url text;`);
   await p.query(`alter table users add column if not exists last_seen timestamptz not null default now();`);
+
+  // Extra profile columns used by registration
+  await p.query(`alter table profiles add column if not exists phone text;`);
+  await p.query(`alter table profiles add column if not exists dob text;`);
+  await p.query(`alter table profiles add column if not exists gender text;`);
+  await p.query(`alter table profiles add column if not exists about_you text;`);
+  await p.query(`alter table profiles add column if not exists reg_type text;`);
+  await p.query(`alter table profiles add column if not exists pl_team text;`);
+  await p.query(`alter table profiles add column if not exists world_team text;`);
+  await p.query(`alter table profiles add column if not exists address_line1 text;`);
+  await p.query(`alter table profiles add column if not exists address_line2 text;`);
+  await p.query(`alter table profiles add column if not exists city text;`);
+  await p.query(`alter table profiles add column if not exists zip_code text;`);
+  await p.query(`alter table profiles add column if not exists country text;`);
+  await p.query(`alter table profiles add column if not exists biz_type text;`);
+  await p.query(`alter table profiles add column if not exists biz_name text;`);
 
   await p.query(`
     create table if not exists lounge_bookings (
@@ -233,6 +249,50 @@ export async function ensureSchema() {
   `);
   await p.query(`create index if not exists connections_addressee_idx on connections (addressee_id, status);`);
   await p.query(`create index if not exists connections_requester_idx on connections (requester_id, status);`);
+
+  // ── Comments ──────────────────────────────────────────────────
+  await p.query(`
+    create table if not exists comments (
+      id bigserial primary key,
+      post_id bigint not null references posts(id) on delete cascade,
+      user_id bigint not null references users(id) on delete cascade,
+      content text not null,
+      created_at timestamptz not null default now()
+    );
+  `);
+  await p.query(`create index if not exists comments_post_idx on comments (post_id, created_at asc);`);
+
+  // ── Subscriptions (Stripe membership) ─────────────────────────
+  await p.query(`
+    create table if not exists subscriptions (
+      id bigserial primary key,
+      user_id bigint not null references users(id) on delete cascade,
+      stripe_customer_id text,
+      stripe_subscription_id text,
+      plan_type text not null default 'individual',
+      price_amount int not null default 1999,
+      status text not null default 'pending',
+      current_period_end timestamptz,
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now()
+    );
+  `);
+  await p.query(`create index if not exists subscriptions_user_idx on subscriptions (user_id);`);
+  await p.query(`create index if not exists subscriptions_stripe_sub_idx on subscriptions (stripe_subscription_id);`);
+
+  // Auto-grant existing users who don't have a subscription yet
+  await p.query(`
+    insert into subscriptions (user_id, plan_type, price_amount, status, current_period_end)
+    select u.id, coalesce(pr.reg_type, 'individual'),
+           case when coalesce(pr.reg_type,'individual') = 'individual' then 1999 else 2999 end,
+           'active',
+           (now() + interval '100 years')
+    from users u
+    left join profiles pr on pr.user_id = u.id
+    where not exists (select 1 from subscriptions s where s.user_id = u.id)
+  `);
+
+  didInit = true;
 }
 
 

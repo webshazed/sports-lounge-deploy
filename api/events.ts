@@ -37,7 +37,22 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
          returning id, title, starts_at, location, rsvp_count, created_at`,
         [session.userId, title, startsAt.toISOString(), location]
       );
-      return sendJson(res, 201, { event: inserted.rows[0] });
+      
+      const event = inserted.rows[0];
+
+      // Broadcast to dashboard feed
+      const formattedDate = startsAt.toLocaleDateString(undefined, { 
+        weekday: 'short', month: 'short', day: 'numeric', 
+        hour: 'numeric', minute: '2-digit' 
+      });
+      const postContent = `📅 **I just created a new Event:** ${title}\n\n📍 ${location || 'Location TBA'}\n⏰ ${formattedDate}\n\nCheck it out and RSVP on the Events tab!`;
+      
+      await pool.query(
+        `insert into posts (user_id, kind, content) values ($1, 'Events', $2)`,
+        [session.userId, postContent]
+      );
+
+      return sendJson(res, 201, { event });
     }
 
     const url = getUrl(req);

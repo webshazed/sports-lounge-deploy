@@ -58,6 +58,28 @@ const SignIn = () => {
       localStorage.setItem("auth_token", token);
       localStorage.setItem("auth_user", JSON.stringify(user));
       notifyAuthChanged();
+
+      // Check subscription status before redirecting
+      try {
+        const subRes = await fetch("/api/subscription", {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (subRes.ok) {
+          const subData = await subRes.json();
+          if (!subData.subscription || subData.subscription.status !== "active") {
+            // No active subscription — go to membership page
+            if (subData.regType) {
+              localStorage.setItem("reg_type", subData.regType);
+            }
+            toast.success(`Welcome back, ${user.username}! Please complete your membership.`);
+            navigate("/membership");
+            return;
+          }
+        }
+      } catch {
+        // If subscription check fails, still allow dashboard access
+      }
+
       toast.success(`Welcome back, ${user.username}`);
       navigate("/dashboard");
     } catch (err) {

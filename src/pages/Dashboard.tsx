@@ -17,6 +17,8 @@ import {
   Plus,
   Heart,
   Trash2,
+  Send,
+  X,
 } from "lucide-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { useNavigate } from "react-router-dom";
@@ -89,6 +91,8 @@ type DashboardResponse = {
     mediaUrls?: string[];
     createdAt: string;
     stats: { likes: number; comments: number };
+    myLike?: boolean;
+    mySave?: boolean;
     author: {
       id: number;
       username: string;
@@ -113,6 +117,13 @@ const Dashboard = () => {
   const [filter, setFilter] = useState<FeedFilter>("All");
   const [mobileTab, setMobileTab] = useState<MobileTab>("Feed");
   const queryClient = useQueryClient();
+  const [searchQuery, setSearchQuery] = useState("");
+
+  const handleSearchKeys = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter" && searchQuery.trim()) {
+      navigate(`/members?q=${encodeURIComponent(searchQuery.trim())}`);
+    }
+  };
 
   const [composerKind, setComposerKind] = useState<ComposerKind>("Post");
   const [composerText, setComposerText] = useState("");
@@ -125,6 +136,48 @@ const Dashboard = () => {
   const [likedMap, setLikedMap] = useState<Record<number, boolean>>({});
   const [savedMap, setSavedMap] = useState<Record<number, boolean>>({});
   const [likeCounts, setLikeCounts] = useState<Record<number, number>>({});
+
+  // Comment state
+  type Comment = { id: number; content: string; created_at: string; user_id: number; username: string; full_name: string | null; avatar_url: string | null };
+  const [openComments, setOpenComments] = useState<Record<number, boolean>>({});
+  const [comments, setComments] = useState<Record<number, Comment[]>>({});
+  const [commentText, setCommentText] = useState<Record<number, string>>({});
+  const [commentLoading, setCommentLoading] = useState<Record<number, boolean>>({});
+  const [commentCounts, setCommentCounts] = useState<Record<number, number>>({});
+
+  const toggleComments = async (postId: number, serverCount: number) => {
+    const isOpen = openComments[postId];
+    setOpenComments((m) => ({ ...m, [postId]: !isOpen }));
+    if (!isOpen && !comments[postId]) {
+      setCommentLoading((m) => ({ ...m, [postId]: true }));
+      try {
+        const data = await apiFetch<{ comments: Comment[] }>(`/api/feed/${postId}/comments`);
+        setComments((m) => ({ ...m, [postId]: data.comments }));
+      } catch { /* silent */ }
+      setCommentLoading((m) => ({ ...m, [postId]: false }));
+    }
+  };
+
+  const submitComment = async (postId: number) => {
+    const text = (commentText[postId] || "").trim();
+    if (!text) return;
+    setCommentText((m) => ({ ...m, [postId]: "" }));
+    try {
+      const data = await apiFetch<{ comment: Comment }>(`/api/feed/${postId}/comments`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content: text }),
+      });
+      setComments((m) => ({ ...m, [postId]: [...(m[postId] || []), data.comment] }));
+      setCommentCounts((m) => ({ ...m, [postId]: (m[postId] ?? 0) + 1 }));
+    } catch { toast.error("Failed to comment"); }
+  };
+
+  const deleteComment = async (commentId: number, postId: number) => {
+    try {
+      await apiFetch(`/api/comments/${commentId}`, { method: "DELETE" });
+      setComments((m) => ({ ...m, [postId]: (m[postId] || []).filter((c) => c.id !== commentId) }));
+      setCommentCounts((m) => ({ ...m, [postId]: Math.max(0, (m[postId] ?? 1) - 1) }));
+    } catch { toast.error("Failed to delete"); }
+  };
 
   const handleLike = useCallback(async (postId: number, currentCount: number) => {
     const prev = likedMap[postId] ?? false;
@@ -152,6 +205,13 @@ const Dashboard = () => {
     }
   }, [savedMap]);
 
+  const handleConnect = async (userId: number) => {
+    try {
+      await apiFetch(`/api/friends/${userId}`, { method: "POST" });
+      toast.success("Connection request sent!");
+    } catch (e) { toast.error(e instanceof Error ? e.message : "Failed"); }
+  };
+
   const composerServerKind: DashboardResponse["feed"][number]["kind"] =
     composerKind === "Media" ? "Post" : composerKind;
 
@@ -174,6 +234,26 @@ const Dashboard = () => {
       return count < 2;
     },
   });
+
+  // Initialize like/save state from API data
+  useEffect(() => {
+    if (dashboardQuery.data?.feed) {
+      const lm: Record<number, boolean> = {};
+      const sm: Record<number, boolean> = {};
+      const lc: Record<number, number> = {};
+      const cc: Record<number, number> = {};
+      for (const p of dashboardQuery.data.feed) {
+        if (likedMap[p.id] === undefined && p.myLike) lm[p.id] = true;
+        if (savedMap[p.id] === undefined && p.mySave) sm[p.id] = true;
+        lc[p.id] = likeCounts[p.id] ?? p.stats.likes;
+        cc[p.id] = commentCounts[p.id] ?? p.stats.comments;
+      }
+      if (Object.keys(lm).length) setLikedMap((m) => ({ ...lm, ...m }));
+      if (Object.keys(sm).length) setSavedMap((m) => ({ ...sm, ...m }));
+      setLikeCounts((m) => ({ ...lc, ...m }));
+      setCommentCounts((m) => ({ ...cc, ...m }));
+    }
+  }, [dashboardQuery.data?.feed]);
 
   const onCreatePost = async () => {
     const content = composerText.trim();
@@ -266,7 +346,12 @@ const Dashboard = () => {
                 <div className="mt-6 space-y-4">
                   <div className="rounded-xl border border-border bg-card p-4">
                     <div className="flex items-center gap-3">
-                      <div className="h-10 w-10 rounded-full bg-gradient-to-br from-[#d4af37] via-[#1e346b] to-[#0b0f1a]" />
+                      <Avatar
+                        seed={dashboardQuery.data?.me?.username || name}
+                        src={dashboardQuery.data?.me?.avatarUrl}
+                        name={dashboardQuery.data?.me?.fullName || name}
+                        className="h-10 w-10 border border-border"
+                      />
                       <div>
                         <div className="font-semibold text-foreground">{name}</div>
                         <div className="text-xs text-muted-foreground">Gold Member</div>
@@ -364,7 +449,10 @@ const Dashboard = () => {
                 <Search className="h-4 w-4 text-muted-foreground" />
                 <input
                   className="bg-transparent outline-none text-sm w-64"
-                  placeholder="Search members, events, matches…"
+                  placeholder="Search members…"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onKeyDown={handleSearchKeys}
                 />
               </div>
               <a href="/dashboard" className="text-sm font-medium text-foreground hover:opacity-80">
@@ -533,7 +621,12 @@ const Dashboard = () => {
               {/* Mobile: compact create post */}
               <div className="md:hidden rounded-xl border border-border bg-card p-4">
                 <div className="flex items-center gap-3">
-                  <div className="h-9 w-9 rounded-full bg-gradient-to-br from-[#1e346b] to-[#d4af37]" />
+                  <Avatar
+                    seed={dashboardQuery.data?.me?.username || name}
+                    src={dashboardQuery.data?.me?.avatarUrl}
+                    name={dashboardQuery.data?.me?.fullName || name}
+                    className="h-9 w-9 border border-border"
+                  />
                   <button
                     type="button"
                     onClick={() => setMobileComposerOpen(true)}
@@ -649,7 +742,12 @@ const Dashboard = () => {
               {/* Desktop: full create post */}
               <div className="hidden md:block rounded-xl border border-border bg-card p-4">
                 <div className="flex items-start gap-3">
-                  <div className="h-10 w-10 rounded-full bg-gradient-to-br from-[#1e346b] to-[#d4af37]" />
+                  <Avatar
+                    seed={dashboardQuery.data?.me?.username || name}
+                    src={dashboardQuery.data?.me?.avatarUrl}
+                    name={dashboardQuery.data?.me?.fullName || name}
+                    className="h-10 w-10 border border-border"
+                  />
                   <div className="flex-1">
                     <div className="text-sm text-muted-foreground mb-2">
                       What’s happening, <span className="text-foreground font-medium">{name}</span>?
@@ -774,13 +872,33 @@ const Dashboard = () => {
                   const isLiked = likedMap[p.id] ?? false;
                   const isSaved = savedMap[p.id] ?? false;
                   const likeCount = likeCounts[p.id] ?? p.stats.likes;
+                  
+                  const kindOptions: Record<string, { label: string, color: string, border: string, bg: string }> = {
+                    Business: { label: "🤝 Business", color: "text-amber-800 dark:text-amber-300 bg-amber-100 dark:bg-amber-900/40", border: "border-l-amber-500", bg: "bg-gradient-to-r from-amber-500/10 to-transparent" },
+                    Events: { label: "📅 Event", color: "text-emerald-800 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-900/40", border: "border-l-emerald-500", bg: "bg-gradient-to-r from-emerald-500/10 to-transparent" },
+                    Matches: { label: "⚽ Match", color: "text-blue-800 dark:text-blue-300 bg-blue-100 dark:bg-blue-900/40", border: "border-l-blue-500", bg: "bg-gradient-to-r from-blue-500/10 to-transparent" },
+                    Media: { label: "📸 Media", color: "text-purple-800 dark:text-purple-300 bg-purple-100 dark:bg-purple-900/40", border: "border-l-purple-500", bg: "bg-gradient-to-r from-purple-500/10 to-transparent" },
+                  };
+                  const kindStyle = kindOptions[p.kind];
+                  
                   return (
-                    <div key={p.id} className="rounded-xl border border-border bg-card p-4">
-                      <div className="flex items-start justify-between gap-3">
+                    <div 
+                      key={p.id} 
+                      className={`relative overflow-hidden rounded-xl border border-border bg-card p-4 transition-all duration-300 ${kindStyle ? `border-l-4 ${kindStyle.border}` : ""}`}
+                    >
+                      {kindStyle && <div className={`absolute -inset-x-4 -top-4 h-20 pointer-events-none ${kindStyle.bg}`} />}
+                      <div className="relative z-10 flex items-start justify-between gap-3">
                         <div className="flex items-center gap-3">
-                          <Avatar seed={authorName} name={authorName} src={p.author.avatarUrl || undefined} className="h-10 w-10" />
+                          <Avatar seed={authorName} name={authorName} src={p.author.avatarUrl || undefined} className="h-10 w-10 ring-2 ring-background shadow-sm" />
                           <div>
-                            <div className="font-semibold text-foreground">{authorName}</div>
+                            <div className="font-semibold text-foreground flex items-center gap-2">
+                              {authorName}
+                              {kindStyle && (
+                                <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider ${kindStyle.color}`}>
+                                  {kindStyle.label}
+                                </span>
+                              )}
+                            </div>
                             <div className="text-xs text-muted-foreground">{authorRole}</div>
                           </div>
                         </div>
@@ -871,7 +989,7 @@ const Dashboard = () => {
                       {/* Reaction bar */}
                       <div className="mt-4 flex items-center justify-between text-sm border-t border-border/50 pt-3">
                         <div className="text-muted-foreground text-xs">
-                          👍 {likeCount} &nbsp; 💬 {p.stats.comments}
+                          👍 {likeCount} &nbsp; 💬 {commentCounts[p.id] ?? p.stats.comments}
                         </div>
                         <div className="flex gap-2">
                           <button
@@ -885,11 +1003,81 @@ const Dashboard = () => {
                             <Heart className={`h-3.5 w-3.5 ${isLiked ? "fill-current" : ""}`} />
                             {isLiked ? "Liked" : "Like"}
                           </button>
-                          <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border hover:bg-background text-xs font-medium transition-colors">
-                            💬 Comment
+                          <button 
+                            onClick={() => toggleComments(p.id, p.stats.comments)}
+                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
+                              openComments[p.id] ? "bg-muted text-foreground border-border" : "border-border hover:bg-background text-muted-foreground hover:text-foreground"
+                            }`}
+                          >
+                            <MessageSquare className="h-3.5 w-3.5" /> Comment
                           </button>
                         </div>
                       </div>
+
+                      {/* Comment Section */}
+                      {openComments[p.id] && (
+                        <div className="mt-3 pt-3 border-t border-border/30 px-1">
+                          {/* Add Comment Input */}
+                          <div className="flex gap-3 items-start mb-4">
+                            <Avatar seed={name} src={dashboardQuery.data?.me?.avatarUrl} name={name} className="h-8 w-8 mt-1" />
+                            <div className="flex-1 bg-muted/50 border border-border rounded-xl focus-within:ring-1 focus-within:ring-primary focus-within:border-primary overflow-hidden transition-all">
+                              <textarea
+                                value={commentText[p.id] || ""}
+                                onChange={(e) => setCommentText(m => ({ ...m, [p.id]: e.target.value }))}
+                                placeholder="Write a comment..."
+                                className="w-full bg-transparent border-none px-3 py-2 text-sm outline-none resize-none min-h-[44px]"
+                                rows={1}
+                              />
+                              {(commentText[p.id] || "").trim().length > 0 && (
+                                <div className="flex justify-end p-2 border-t border-border bg-card/50">
+                                  <button
+                                    onClick={() => submitComment(p.id)}
+                                    className="bg-primary text-primary-foreground hover:bg-primary/90 text-[11px] font-semibold px-3 py-1.5 rounded-md flex items-center gap-1 transition-colors"
+                                  >
+                                    <Send className="h-3 w-3" /> Post
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Comments List */}
+                          <div className="space-y-3">
+                            {commentLoading[p.id] ? (
+                              <div className="text-xs text-muted-foreground text-center py-2 animate-pulse">Loading comments...</div>
+                            ) : comments[p.id]?.length > 0 ? (
+                              comments[p.id].map(c => (
+                                <div key={c.id} className="flex gap-3 group">
+                                  <Avatar seed={c.full_name || c.username} src={c.avatar_url} name={c.full_name || c.username} className="h-8 w-8" />
+                                  <div className="flex-1">
+                                    <div className="bg-muted px-3 py-2 min-h-[40px] rounded-2xl rounded-tl-sm w-fit inline-block items-center border border-border/40">
+                                      <div className="flex items-center gap-2 mb-0.5">
+                                        <span className="text-xs font-semibold leading-none">{c.full_name || c.username}</span>
+                                      </div>
+                                      <div className="text-sm text-foreground/90 leading-snug whitespace-pre-wrap breakdown-words">{c.content}</div>
+                                    </div>
+                                    <div className="flex items-center gap-3 mt-1 ml-2 text-[10px] text-muted-foreground font-medium">
+                                      <span>{new Date(c.created_at).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'})}</span>
+                                      {c.user_id === dashboardQuery.data?.me?.id && (
+                                        <button 
+                                          onClick={() => deleteComment(c.id, p.id)}
+                                          className="hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
+                                        >
+                                          Delete
+                                        </button>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+                              ))
+                            ) : (
+                              <div className="text-xs text-muted-foreground text-center py-4 bg-muted/30 rounded-lg border border-border/30">
+                                No comments yet. Be the first to reply.
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   );
                 })
@@ -911,7 +1099,10 @@ const Dashboard = () => {
                           {new Date(e.startsAt).toLocaleString()}
                           {e.location ? ` • ${e.location}` : ""}
                         </div>
-                        <button className="mt-3 w-full border border-border rounded-lg text-sm py-2 hover:bg-card transition-colors">
+                        <button
+                          onClick={() => navigate("/events")}
+                          className="mt-3 w-full border border-border rounded-lg text-sm py-2 hover:bg-card transition-colors"
+                        >
                           RSVP
                         </button>
                       </div>
@@ -939,7 +1130,10 @@ const Dashboard = () => {
                               <div className="text-xs text-muted-foreground">{m.role || "Member"}</div>
                             </div>
                           </div>
-                          <button className="px-3 py-1.5 rounded-lg border border-border text-sm hover:bg-background transition-colors">
+                          <button
+                            onClick={() => handleConnect(m.id)}
+                            className="px-3 py-1.5 rounded-lg border border-border text-sm hover:bg-background transition-colors"
+                          >
                             Connect
                           </button>
                         </div>
@@ -972,14 +1166,10 @@ const Dashboard = () => {
               <div className="rounded-xl border border-border bg-card p-4">
                 <div className="font-semibold text-foreground mb-3">Quick Actions</div>
                 <div className="grid grid-cols-2 gap-2">
-                  {["+ Create Post", "+ Book Table", "+ Start Chat", "+ Create Event"].map((a) => (
-                    <button
-                      key={a}
-                      className="rounded-lg border border-border bg-background py-2 text-sm hover:bg-card transition-colors"
-                    >
-                      {a}
-                    </button>
-                  ))}
+                  <button onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })} className="rounded-lg border border-border bg-background py-2 text-sm hover:bg-card transition-colors">+ Create Post</button>
+                  <button onClick={() => navigate("/lounge/book")} className="rounded-lg border border-border bg-background py-2 text-sm hover:bg-card transition-colors">+ Book Table</button>
+                  <button onClick={() => navigate("/messages")} className="rounded-lg border border-border bg-background py-2 text-sm hover:bg-card transition-colors">+ Start Chat</button>
+                  <button onClick={() => navigate("/events")} className="rounded-lg border border-border bg-background py-2 text-sm hover:bg-card transition-colors">+ Create Event</button>
                 </div>
               </div>
             </aside>

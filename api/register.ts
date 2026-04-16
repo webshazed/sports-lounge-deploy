@@ -19,8 +19,9 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
     const email = body.email || "";
     const username = body.username || "";
     const password = body.password || "";
-
-    const result = await registerUser({ email, username, password });
+    
+    // Pass everything else to registerUser
+    const result = await registerUser(body);
     return sendJson(res, 201, result);
   } catch (e) {
     const message = e instanceof Error ? e.message : "Unknown error";

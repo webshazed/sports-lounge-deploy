@@ -15,6 +15,7 @@ export async function registerUser(input: {
   email: string;
   username: string;
   password: string;
+  couponCode?: string;
   firstName?: string;
   lastName?: string;
   phone?: string;
@@ -33,7 +34,7 @@ export async function registerUser(input: {
   country?: string;
   bizType?: string;
   bizName?: string;
-}): Promise<{ user: PublicUser }> {
+}): Promise<{ token: string; user: PublicUser; regType: string }> {
   await ensureSchema();
 
   const email = input.email.trim().toLowerCase();
@@ -44,8 +45,15 @@ export async function registerUser(input: {
     throw new Error("Invalid input");
   }
 
+  if (input.membershipType === "Coupon Code") {
+    if (input.couponCode !== "KINGSOFSPORTSLIFETIME") {
+      throw new Error("Invalid Coupon Code");
+    }
+  }
+
   const passwordHash = await bcrypt.hash(password, 12);
   const pool = getPool();
+  const regType = input.regType || "individual";
   
   await pool.query('BEGIN');
   try {
@@ -78,12 +86,24 @@ export async function registerUser(input: {
         input.country || null,
         input.bizType || null,
         input.bizName || null,
-        input.regType || null
+        regType
       ]
     );
 
+    // Apply lifetime subscription if coupon is used
+    if (input.membershipType === "Coupon Code" && input.couponCode === "KINGSOFSPORTSLIFETIME") {
+      await pool.query(
+        `insert into subscriptions (user_id, stripe_customer_id, stripe_subscription_id, plan_type, price_amount, status, current_period_end, updated_at)
+         values ($1, 'coupon', 'coupon_lifetime', 'lifetime', 0, 'active', '2099-12-31', now())`,
+        [user.id]
+      );
+    }
+
     await pool.query('COMMIT');
-    return { user: user as PublicUser };
+    
+    // Issue a JWT token so the user is auto-logged-in after registration
+    const token = jwt.sign({ sub: String(user.id), ...user }, getJwtSecret(), { expiresIn: "7d" });
+    return { token, user: user as PublicUser, regType };
   } catch (e) {
     await pool.query('ROLLBACK');
     throw e;

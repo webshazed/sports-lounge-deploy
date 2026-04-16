@@ -54,10 +54,11 @@ export default function Events() {
     if (!form.title || !form.startsAt) { toast.error("Title and date required"); return; }
     setSubmitting(true);
     try {
+      const startsAtIso = new Date(form.startsAt).toISOString();
       await apiFetch("/api/events", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: form.title, startsAt: form.startsAt, location: form.location }),
+        body: JSON.stringify({ title: form.title, startsAt: startsAtIso, location: form.location }),
       });
       toast.success("Event created!");
       setForm({ title: "", startsAt: "", location: "" });
@@ -158,7 +159,7 @@ export default function Events() {
                 <h2 className="text-lg font-bold text-foreground mb-4">Upcoming Events</h2>
                 <div className="grid gap-4 sm:grid-cols-2">
                   {upcoming.map((evt) => (
-                    <EventCard key={evt.id} evt={evt} userId={user?.id} onRsvp={handleRsvp} rsvping={rsvping} />
+                    <EventCard key={evt.id} evt={evt} userId={user ? Number(user.id) : undefined} onRsvp={handleRsvp} rsvping={rsvping} />
                   ))}
                 </div>
               </section>
@@ -168,7 +169,7 @@ export default function Events() {
                 <h2 className="text-lg font-bold text-foreground mb-4 text-muted-foreground">Past Events</h2>
                 <div className="grid gap-4 sm:grid-cols-2 opacity-70">
                   {past.map((evt) => (
-                    <EventCard key={evt.id} evt={evt} userId={user?.id} onRsvp={handleRsvp} rsvping={rsvping} past />
+                    <EventCard key={evt.id} evt={evt} userId={user ? Number(user.id) : undefined} onRsvp={handleRsvp} rsvping={rsvping} past />
                   ))}
                 </div>
               </section>
@@ -220,9 +221,13 @@ function EventCard({
           <button
             onClick={() => onRsvp(evt.id)}
             disabled={rsvping === evt.id}
-            className="btn-primary text-xs py-1.5 px-3 disabled:opacity-50"
+            className={`text-xs py-1.5 px-3 disabled:opacity-50 transition-colors ${
+              evt.myRsvp 
+                ? "bg-muted text-foreground hover:bg-destructive hover:text-destructive-foreground rounded-[30px]" 
+                : "btn-primary"
+            }`}
           >
-            {rsvping === evt.id ? "…" : "RSVP"}
+            {rsvping === evt.id ? "…" : evt.myRsvp ? "Attending" : "RSVP"}
           </button>
         )}
       </div>

@@ -4,6 +4,7 @@ import { motion } from "framer-motion";
 import { useState } from "react";
 import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
+import { notifyAuthChanged } from "@/lib/auth";
 import { countries } from "@/data/countries";
 import {
   aboutYouOptions, individualMembershipTypes, businessMembershipTypes,
@@ -32,7 +33,7 @@ async function registerAccount(data: any) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
   });
-  const parsed = await readJsonOrText<{ user: { id: number; email: string; username: string } } | { error: string; details?: string }>(
+  const parsed = await readJsonOrText<{ token: string; user: { id: number; email: string; username: string }; regType: string } | { error: string; details?: string }>(
     res
   );
   if (parsed.ok === false) {
@@ -40,7 +41,7 @@ async function registerAccount(data: any) {
   }
   const json = parsed.json;
   if (!res.ok) throw new Error("error" in json ? json.error : "Registration failed");
-  return json as { user: { id: number; email: string; username: string } };
+  return json as { token: string; user: { id: number; email: string; username: string }; regType: string };
 }
 
 const SelectField = ({
@@ -102,6 +103,7 @@ const Register = () => {
   const [lastName, setLastName] = useState("");
   const [aboutYou, setAboutYou] = useState("");
   const [membershipType, setMembershipType] = useState("");
+  const [couponCode, setCouponCode] = useState("");
   const [sports, setSports] = useState<string[]>([]);
   const [plTeam, setPlTeam] = useState<string[]>([]);
   const [worldTeam, setWorldTeam] = useState<string[]>([]);
@@ -125,12 +127,13 @@ const Register = () => {
     e.preventDefault();
     setLoading(true);
     try {
-      await registerAccount({
+      const result = await registerAccount({
         email, username, password,
         firstName, lastName, phone, dob, gender,
         aboutYou: aboutYou,
         favoriteSports: sports,
         membershipType,
+        couponCode,
         plTeam: plTeam,
         worldTeam: worldTeam,
         addressLine1: address1,
@@ -142,8 +145,19 @@ const Register = () => {
         bizName,
         regType
       });
-      toast.success("Registration successful. You can now sign in.");
-      navigate("/signin", { state: { emailOrUsername: email || username } });
+      // Auto-login: store token and user data
+      localStorage.setItem("auth_token", result.token);
+      localStorage.setItem("auth_user", JSON.stringify(result.user));
+      localStorage.setItem("reg_type", result.regType || regType);
+      notifyAuthChanged();
+      
+      if (membershipType === "Coupon Code") {
+        toast.success("Lifetime membership granted! Welcome to the club.");
+        navigate("/dashboard");
+      } else {
+        toast.success("Registration successful! Choose your membership plan.");
+        navigate("/membership");
+      }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Registration failed");
     } finally {
@@ -214,6 +228,20 @@ const Register = () => {
               value={membershipType}
               onChange={setMembershipType}
             />
+
+            {membershipType === "Coupon Code" && (
+              <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} className="overflow-hidden space-y-2">
+                <label className={labelClass}>Enter Coupon Code</label>
+                <input 
+                  type="text" 
+                  value={couponCode} 
+                  required
+                  onChange={(e) => setCouponCode(e.target.value.toUpperCase())} 
+                  className={inputClass} 
+                  placeholder="e.g. LIFETIME2026" 
+                />
+              </motion.div>
+            )}
 
             {/* Business-only fields */}
             {regType === "business" && (
