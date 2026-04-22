@@ -170,6 +170,35 @@ export async function ensureSchema() {
   `);
   await p.query(`create index if not exists messages_convo_idx on messages (least(sender_id,receiver_id), greatest(sender_id,receiver_id), created_at desc);`);
 
+  await p.query(`
+    create table if not exists legacy_user_mappings (
+      source text not null,
+      legacy_user_id bigint not null,
+      new_user_id bigint not null references users(id) on delete cascade,
+      legacy_username text,
+      legacy_email text,
+      legacy_display_name text,
+      legacy_password_hash text,
+      imported_at timestamptz not null default now(),
+      primary key (source, legacy_user_id)
+    );
+  `);
+  await p.query(`create index if not exists legacy_user_mappings_new_user_idx on legacy_user_mappings (new_user_id);`);
+  await p.query(`create index if not exists legacy_user_mappings_username_idx on legacy_user_mappings (lower(legacy_username));`);
+  await p.query(`create index if not exists legacy_user_mappings_email_idx on legacy_user_mappings (lower(legacy_email));`);
+
+  await p.query(`
+    create table if not exists legacy_message_mappings (
+      source text not null,
+      legacy_message_id bigint not null,
+      new_message_id bigint not null references messages(id) on delete cascade,
+      legacy_thread_id bigint,
+      imported_at timestamptz not null default now(),
+      primary key (source, legacy_message_id)
+    );
+  `);
+  await p.query(`create index if not exists legacy_message_mappings_new_message_idx on legacy_message_mappings (new_message_id);`);
+
   // ── Post Likes ────────────────────────────────────────────────
   await p.query(`
     create table if not exists post_likes (
