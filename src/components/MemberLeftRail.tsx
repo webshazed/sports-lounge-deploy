@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { PanelLeftClose, PanelLeftOpen, User } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import Avatar from "@/components/Avatar";
@@ -76,31 +76,26 @@ export default function MemberLeftRail() {
 
   return (
     <aside
-      className={`fixed inset-y-16 left-0 z-40 hidden border-r border-slate-200 bg-white/95 shadow-[0_0_30px_rgba(15,23,42,0.06)] backdrop-blur lg:flex lg:flex-col ${
+      className={`fixed inset-y-0 left-0 z-50 hidden overflow-hidden border-r border-slate-200 bg-white shadow-[0_18px_60px_rgba(15,23,42,0.10)] transition-[width,box-shadow] duration-300 ease-out lg:flex lg:flex-col ${
         collapsed ? "w-[88px]" : "w-[244px]"
       }`}
     >
-      <div className={`flex items-center border-b border-slate-200 px-4 py-4 ${collapsed ? "justify-center" : "justify-between"}`}>
-        {!collapsed ? (
-          <Link to="/dashboard" className="flex items-center gap-3">
-            <img src="/Logo-1.png" alt="Sports Lounge" className="h-10 w-auto" />
-          </Link>
-        ) : (
-          <Link to="/dashboard" className="flex items-center justify-center">
-            <img src="/Logo-1.png" alt="Sports Lounge" className="h-9 w-auto" />
-          </Link>
-        )}
+      <div
+        className={`flex min-h-[78px] items-center border-b border-slate-200 bg-white px-4 py-4 ${
+          collapsed ? "justify-center" : "justify-end"
+        }`}
+      >
         <button
           type="button"
           onClick={() => setCollapsed((prev) => !prev)}
-          className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 text-slate-500 transition hover:bg-slate-50 hover:text-slate-900"
+          className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 transition-all duration-200 hover:bg-slate-50 hover:text-slate-900"
           title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
         >
           {collapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-3 py-4">
+      <div className="flex-1 overflow-y-auto bg-white px-3 py-5">
         <nav className="space-y-2">
           {memberNav.map((item) => {
             const Icon = item.icon;
@@ -112,7 +107,7 @@ export default function MemberLeftRail() {
                 type="button"
                 onClick={() => navigate(item.href)}
                 title={item.label}
-                className={`group relative flex w-full items-center rounded-2xl transition-all ${
+                className={`group relative flex w-full items-center rounded-2xl transition-all duration-200 ease-out ${
                   collapsed ? "justify-center px-0 py-3" : "gap-3 px-3 py-3"
                 } ${
                   isActive
@@ -137,11 +132,11 @@ export default function MemberLeftRail() {
         </nav>
       </div>
 
-      <div className="border-t border-slate-200 px-3 py-4">
+      <div className="border-t border-slate-200 bg-white px-3 py-4">
         <button
           type="button"
           onClick={() => navigate(authUser?.username ? `/profile/${authUser.username}` : "/profile")}
-          className={`flex w-full items-center rounded-2xl transition hover:bg-slate-50 ${
+          className={`flex w-full items-center rounded-2xl transition-all duration-200 ease-out hover:bg-slate-50 ${
             collapsed ? "justify-center px-0 py-3" : "gap-3 px-3 py-3"
           }`}
           title="Profile"

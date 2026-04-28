@@ -3,7 +3,10 @@ import { useMemo, useState, useCallback, useEffect } from "react";
 import { getAuthUser } from "@/lib/auth";
 import { toast } from "sonner";
 import {
+  Bookmark,
+  BookmarkCheck,
   CalendarDays,
+  Home,
   MessageSquare,
   Trophy,
   MonitorPlay,
@@ -12,6 +15,7 @@ import {
   Heart,
   Trash2,
   Send,
+  Users,
   X,
   PanelLeftClose,
   PanelLeftOpen,
