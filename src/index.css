@@ -99,6 +99,18 @@
     @apply bg-background text-foreground font-body antialiased;
   }
 
+  @media (min-width: 1024px) {
+    body.member-rail-collapsed {
+      padding-left: 88px;
+      transition: padding-left 200ms ease;
+    }
+
+    body.member-rail-expanded {
+      padding-left: 244px;
+      transition: padding-left 200ms ease;
+    }
+  }
+
   h1, h2, h3, h4, h5, h6 {
     @apply font-display;
   }

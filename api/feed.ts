@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { ensureSchema, getPool } from "./_lib/db.js";
+import { createNewPostNotifications } from "./_lib/notifications.js";
 import { getSessionFromAuthHeader } from "./_lib/session.js";
 import { allowMethods, readJson, sendJson } from "./_lib/http.js";
 
@@ -45,6 +46,15 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
          returning id, kind, content, like_count, comment_count, created_at, media_url, media_type`,
         [session.userId, kind, content || "", mediaUrl, mediaType]
       );
+
+      await createNewPostNotifications(pool, {
+        actorUserId: session.userId,
+        postId: Number(inserted.rows[0].id),
+        kind,
+        content,
+        hasMedia: Boolean(mediaUrl),
+      });
+
       return sendJson(res, 201, { post: inserted.rows[0] });
     }
 

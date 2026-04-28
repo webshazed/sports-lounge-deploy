@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { ensureSchema, getPool } from "./_lib/db.js";
+import { createNewEventNotifications } from "./_lib/notifications.js";
 import { getSessionFromAuthHeader } from "./_lib/session.js";
 import { allowMethods, readJson, sendJson } from "./_lib/http.js";
 
@@ -39,6 +40,14 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
       );
       
       const event = inserted.rows[0];
+
+      await createNewEventNotifications(pool, {
+        actorUserId: session.userId,
+        eventId: Number(event.id),
+        title: event.title,
+        startsAt: event.starts_at,
+        location: event.location,
+      });
 
       // Broadcast to dashboard feed
       const formattedDate = startsAt.toLocaleDateString(undefined, { 

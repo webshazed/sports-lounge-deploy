@@ -3,6 +3,7 @@ import Header from "@/components/Header";
 import Avatar from "@/components/Avatar";
 import { apiFetch } from "@/lib/api";
 import { getAuthUser } from "@/lib/auth";
+import { MESSAGES_UPDATED_EVENT } from "@/hooks/useUnreadMessagesCount";
 import {
   Send, Search, ArrowLeft, MessageSquare,
   Check, CheckCheck,
@@ -80,6 +81,7 @@ export default function Messages() {
       const data = await apiFetch<{ conversations: Conversation[] }>("/api/messages");
       // Sort: unread first, then by recency — never remove any conv
       setConversations(data.conversations);
+      window.dispatchEvent(new Event(MESSAGES_UPDATED_EVENT));
     } catch {
       // silent – keep existing
     } finally {
@@ -92,6 +94,8 @@ export default function Messages() {
     try {
       const data = await apiFetch<{ messages: Message[] }>(`/api/messages/${userId}`);
       setMessages(data.messages);
+      await fetchConversations();
+      window.dispatchEvent(new Event(MESSAGES_UPDATED_EVENT));
     } catch {
       // keep existing
     }
@@ -144,7 +148,8 @@ export default function Messages() {
       });
       // Replace optimistic with real
       setMessages((prev) => prev.map((m) => (m.id === optimistic.id ? res.message : m)));
-      fetchConversations();
+      await fetchConversations();
+      window.dispatchEvent(new Event(MESSAGES_UPDATED_EVENT));
     } catch {
       // Remove optimistic on failure
       setMessages((prev) => prev.filter((m) => m.id !== optimistic.id));

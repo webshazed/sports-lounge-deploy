@@ -6,6 +6,13 @@ import { allowMethods, readJson, sendJson } from "./_lib/http.js";
 
 type CheckoutBody = { planType?: string };
 
+function normalizeSubscriptionStatus(status: string) {
+  if (status === "active") return "active";
+  if (status === "past_due") return "past_due";
+  if (status === "canceled") return "cancelled";
+  return status;
+}
+
 export default async function handler(req: IncomingMessage, res: ServerResponse) {
   if (req.method !== "POST") {
     allowMethods(res, ["POST"]);
@@ -44,6 +51,80 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
         metadata: { userId: String(session.userId) },
       });
       customerId = customer.id;
+    }
+
+    const existingSubRes = await pool.query(
+      `select plan_type, status, stripe_customer_id, stripe_subscription_id
+       from subscriptions
+       where user_id=$1
+       order by created_at desc
+       limit 1`,
+      [session.userId]
+    );
+    const existingSub = existingSubRes.rows[0];
+
+    if (existingSub?.status === "active" && existingSub?.stripe_subscription_id) {
+      if (existingSub.plan_type === planType) {
+        return sendJson(res, 200, {
+          unchanged: true,
+          message: `Your ${plan.name} is already active.`,
+          planType,
+        });
+      }
+
+      const stripeSubscription = await stripe.subscriptions.retrieve(existingSub.stripe_subscription_id);
+      const itemId = stripeSubscription.items.data[0]?.id;
+      if (!itemId) {
+        throw new Error("Current subscription is missing billable items");
+      }
+
+      const price = await stripe.prices.create({
+        currency: "gbp",
+        unit_amount: plan.price,
+        recurring: { interval: plan.interval },
+        product_data: {
+          name: plan.name,
+          description: plan.description,
+        },
+      });
+
+      const updatedSubscription = await stripe.subscriptions.update(existingSub.stripe_subscription_id, {
+        items: [{ id: itemId, price: price.id }],
+        proration_behavior: "create_prorations",
+        metadata: {
+          userId: String(session.userId),
+          planType,
+        },
+      });
+
+      await pool.query(
+        `update subscriptions
+         set stripe_customer_id=$1,
+             stripe_subscription_id=$2,
+             plan_type=$3,
+             price_amount=$4,
+             status=$5,
+             current_period_end=$6,
+             updated_at=now()
+         where user_id=$7`,
+        [
+          typeof updatedSubscription.customer === "string" ? updatedSubscription.customer : customerId,
+          updatedSubscription.id,
+          planType,
+          plan.price,
+          normalizeSubscriptionStatus(updatedSubscription.status),
+          updatedSubscription.current_period_end
+            ? new Date(updatedSubscription.current_period_end * 1000).toISOString()
+            : null,
+          session.userId,
+        ]
+      );
+
+      return sendJson(res, 200, {
+        upgraded: true,
+        message: `Membership updated to ${plan.name}.`,
+        planType,
+      });
     }
 
     // Determine success/cancel URLs

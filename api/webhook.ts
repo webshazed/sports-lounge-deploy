@@ -3,6 +3,13 @@ import { ensureSchema, getPool } from "./_lib/db.js";
 import { getStripe } from "./_lib/stripe.js";
 import { sendJson } from "./_lib/http.js";
 
+const priceMap: Record<string, number> = {
+  individual: 1999,
+  company_small: 2999,
+  company_medium: 3999,
+  company_large: 4999,
+};
+
 /**
  * Stripe Webhook handler.
  * For Vercel: raw body is available via req body.
@@ -74,6 +81,7 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
       case "customer.subscription.updated": {
         const sub = event.data.object;
         const subscriptionId = sub.id;
+        const planType = sub.metadata?.planType;
         const status = sub.status === "active" ? "active"
           : sub.status === "past_due" ? "past_due"
           : sub.status === "canceled" ? "cancelled"
@@ -82,11 +90,20 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
           ? new Date(sub.current_period_end * 1000).toISOString()
           : null;
 
-        await pool.query(
-          `update subscriptions set status=$1, current_period_end=$2, updated_at=now()
-           where stripe_subscription_id=$3`,
-          [status, periodEnd, subscriptionId]
-        );
+        if (planType && priceMap[planType]) {
+          await pool.query(
+            `update subscriptions
+             set status=$1, current_period_end=$2, plan_type=$3, price_amount=$4, updated_at=now()
+             where stripe_subscription_id=$5`,
+            [status, periodEnd, planType, priceMap[planType], subscriptionId]
+          );
+        } else {
+          await pool.query(
+            `update subscriptions set status=$1, current_period_end=$2, updated_at=now()
+             where stripe_subscription_id=$3`,
+            [status, periodEnd, subscriptionId]
+          );
+        }
         break;
       }
 

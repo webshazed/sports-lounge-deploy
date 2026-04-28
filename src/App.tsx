@@ -8,6 +8,7 @@ import OnlineNow from "./pages/OnlineNow";
 import Messages from "./pages/Messages";
 import Contact from "./pages/Contact.tsx";
 import Partners from "./pages/Partners.tsx";
+import Team from "./pages/Team";
 import Register from "./pages/Register.tsx";
 import SignIn from "./pages/SignIn.tsx";
 import Dashboard from "./pages/Dashboard.tsx";
@@ -20,6 +21,10 @@ import BookTable from "./pages/lounge/BookTable";
 import MatchSchedule from "./pages/lounge/MatchSchedule";
 import MemberPerks from "./pages/lounge/MemberPerks";
 import Events from "./pages/Events";
+import Interviews from "./pages/Interviews";
+import JulieToobyInterview from "./pages/interviews/JulieToobyInterview";
+import EricNixonInterview from "./pages/interviews/EricNixonInterview";
+import DanielleHobsonInterview from "./pages/interviews/DanielleHobsonInterview";
 import LiveMatches from "./pages/LiveMatches";
 import BusinessHub from "./pages/BusinessHub";
 import Leaderboard from "./pages/Leaderboard";
@@ -28,12 +33,14 @@ import Saved from "./pages/Saved";
 import NotFound from "./pages/NotFound.tsx";
 import { useSessionGuard } from "@/hooks/useSessionGuard";
 import SessionWarning from "@/components/SessionWarning";
+import MemberLeftRail from "@/components/MemberLeftRail";
 
 /** Wrapper that mounts the session guard (must be inside BrowserRouter) */
 function SessionGuardWrapper({ children }: { children: React.ReactNode }) {
   const session = useSessionGuard();
   return (
     <>
+      <MemberLeftRail />
       {children}
       <SessionWarning {...session} />
     </>
@@ -53,18 +60,12 @@ const App = () => (
           <Route path="/" element={<Index />} />
           <Route path="/contact" element={<Contact />} />
           <Route path="/partners" element={<Partners />} />
+          <Route path="/team" element={<Team />} />
           <Route path="/signin" element={<SignIn />} />
           <Route path="/register" element={<Register />} />
 
           {/* Membership page — requires auth but NOT subscription */}
-          <Route
-            path="/membership"
-            element={
-              <RequireAuth>
-                <Membership />
-              </RequireAuth>
-            }
-          />
+          <Route path="/membership" element={<Membership />} />
 
           {/* All social platform routes — require auth + active subscription */}
           <Route
@@ -164,6 +165,46 @@ const App = () => (
               <RequireAuth>
                 <RequireSubscription>
                   <Events />
+                </RequireSubscription>
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/interviews"
+            element={
+              <RequireAuth>
+                <RequireSubscription>
+                  <Interviews />
+                </RequireSubscription>
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/interviews/julie-tooby"
+            element={
+              <RequireAuth>
+                <RequireSubscription>
+                  <JulieToobyInterview />
+                </RequireSubscription>
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/interviews/eric-nixon"
+            element={
+              <RequireAuth>
+                <RequireSubscription>
+                  <EricNixonInterview />
+                </RequireSubscription>
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/interviews/danielle-hobson"
+            element={
+              <RequireAuth>
+                <RequireSubscription>
+                  <DanielleHobsonInterview />
                 </RequireSubscription>
               </RequireAuth>
             }

@@ -171,6 +171,24 @@ export async function ensureSchema() {
   await p.query(`create index if not exists messages_convo_idx on messages (least(sender_id,receiver_id), greatest(sender_id,receiver_id), created_at desc);`);
 
   await p.query(`
+    create table if not exists notifications (
+      id bigserial primary key,
+      user_id bigint not null references users(id) on delete cascade,
+      actor_user_id bigint references users(id) on delete set null,
+      kind text not null,
+      entity_type text not null,
+      entity_id bigint not null,
+      title text not null,
+      body text,
+      link text,
+      read_at timestamptz,
+      created_at timestamptz not null default now()
+    );
+  `);
+  await p.query(`create index if not exists notifications_user_created_idx on notifications (user_id, created_at desc);`);
+  await p.query(`create index if not exists notifications_user_unread_idx on notifications (user_id, read_at, created_at desc);`);
+
+  await p.query(`
     create table if not exists legacy_user_mappings (
       source text not null,
       legacy_user_id bigint not null,
@@ -198,6 +216,17 @@ export async function ensureSchema() {
     );
   `);
   await p.query(`create index if not exists legacy_message_mappings_new_message_idx on legacy_message_mappings (new_message_id);`);
+
+  await p.query(`
+    create table if not exists legacy_post_mappings (
+      source text not null,
+      legacy_post_id bigint not null,
+      new_post_id bigint not null references posts(id) on delete cascade,
+      imported_at timestamptz not null default now(),
+      primary key (source, legacy_post_id)
+    );
+  `);
+  await p.query(`create index if not exists legacy_post_mappings_new_post_idx on legacy_post_mappings (new_post_id);`);
 
   // ── Post Likes ────────────────────────────────────────────────
   await p.query(`

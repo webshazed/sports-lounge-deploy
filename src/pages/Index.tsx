@@ -3,7 +3,6 @@ import HeroSection from "@/components/HeroSection";
 import AboutSection from "@/components/AboutSection";
 import MemberBenefits from "@/components/MemberBenefits";
 import LoungeExperience from "@/components/LoungeExperience";
-import UpcomingEvents from "@/components/UpcomingEvents";
 import MembershipSection from "@/components/MembershipSection";
 import SportsGroupSection from "@/components/SportsGroupSection";
 import FinalCTA from "@/components/FinalCTA";
@@ -17,7 +16,6 @@ const Index = () => {
       <AboutSection />
       <MemberBenefits />
       <LoungeExperience />
-      <UpcomingEvents />
       <MembershipSection />
       <SportsGroupSection />
       <FinalCTA />

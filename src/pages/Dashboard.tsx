@@ -4,14 +4,8 @@ import { getAuthUser } from "@/lib/auth";
 import { toast } from "sonner";
 import {
   CalendarDays,
-  Home,
-  Users,
   MessageSquare,
   Trophy,
-  MapPin,
-  Bookmark,
-  BookmarkCheck,
-  BriefcaseBusiness,
   MonitorPlay,
   Search,
   Plus,
@@ -19,47 +13,76 @@ import {
   Trash2,
   Send,
   X,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from "lucide-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { useNavigate } from "react-router-dom";
 import Avatar from "@/components/Avatar";
+import ProfileCompletionWidget, { type ProfileCompletionData } from "@/components/ProfileCompletionWidget";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch, type ApiError } from "@/lib/api";
 import { uploadToR2 } from "@/lib/uploads";
+import { useUnreadMessagesCount } from "@/hooks/useUnreadMessagesCount";
+import { memberNav } from "@/lib/memberNav";
+
+type LinkPreviewData = {
+  url: string;
+  title: string | null;
+  description: string | null;
+  image: string | null;
+  siteName: string | null;
+  hostname: string;
+};
+
+function cleanPostUrl(url: string) {
+  return url.replace(/[),.;!?]+$/g, "");
+}
 
 function LinkPreview({ url }: { url: string }) {
-  const [data, setData] = useState<any>(null);
+  const [data, setData] = useState<LinkPreviewData | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch(`https://api.microlink.io?url=${encodeURIComponent(url)}`)
-      .then((res) => res.json())
+    let cancelled = false;
+    setLoading(true);
+    setData(null);
+
+    apiFetch<{ preview: LinkPreviewData }>(`/api/link-preview?url=${encodeURIComponent(url)}`, { auth: false })
       .then((json) => {
-        if (json.status === "success") setData(json.data);
+        if (!cancelled) setData(json.preview);
       })
       .catch(() => {})
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [url]);
 
-  if (loading || !data) {
-    return (
-      <a href={url} target="_blank" rel="noreferrer" className="block mt-2 text-primary hover:underline break-all text-sm">
-        {url}
-      </a>
-    );
+  if (loading) {
+    return <div className="mt-3 h-24 rounded-xl border border-border bg-muted/30 animate-pulse" />;
   }
 
+  if (!data || (!data.title && !data.description && !data.image)) return null;
+
   return (
-    <a href={url} target="_blank" rel="noreferrer" className="block mt-3 border border-border rounded-xl overflow-hidden bg-muted/30 hover:bg-muted/50 transition-colors group">
-      {data.image?.url && (
-        <div className="w-full h-48 bg-muted overflow-hidden">
-          <img src={data.image.url} alt="" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+    <a href={data.url || url} target="_blank" rel="noreferrer" className="block mt-3 border border-border rounded-xl overflow-hidden bg-muted/30 hover:bg-muted/50 transition-colors group">
+      {data.image && (
+        <div className="w-full max-h-56 bg-muted overflow-hidden">
+          <img
+            src={`/api/link-preview-image?url=${encodeURIComponent(data.image)}`}
+            alt=""
+            className="w-full max-h-56 object-cover group-hover:scale-105 transition-transform duration-500"
+          />
         </div>
       )}
       <div className="p-3">
-        <div className="font-semibold text-sm line-clamp-1 text-foreground">{data.title || url}</div>
+        <div className="font-semibold text-sm line-clamp-2 text-foreground">{data.title || data.hostname}</div>
         {data.description && <div className="text-xs text-muted-foreground line-clamp-2 mt-1">{data.description}</div>}
-        <div className="text-[10px] text-muted-foreground mt-2 uppercase tracking-wider">{new URL(url).hostname}</div>
+        <div className="text-[10px] text-muted-foreground mt-2 uppercase tracking-wider">{data.siteName || data.hostname}</div>
       </div>
     </a>
   );
@@ -107,6 +130,87 @@ type DashboardResponse = {
   onlineNow: Array<{ id: number; username: string; fullName: string | null; lastSeen: string }>;
 };
 
+type MeProfileResponse = {
+  user: {
+    id: number;
+    email: string;
+    username: string;
+  };
+  profile: {
+    fullName?: string | null;
+    role?: string | null;
+    company?: string | null;
+    bio?: string | null;
+    industry?: string | null;
+    favoriteSports?: string | null;
+    businessInterests?: string | null;
+    lookingFor?: string[];
+    badges?: string[];
+    coverImageUrl?: string | null;
+    avatarUrl?: string | null;
+    membershipTier?: string | null;
+    location?: string | null;
+  } | null;
+};
+
+function hasText(value: string | null | undefined) {
+  return Boolean(value && value.trim());
+}
+
+function buildProfileCompletion(data?: MeProfileResponse): ProfileCompletionData | null {
+  if (!data) return null;
+
+  const profile = data.profile || {};
+  const sections = [
+    {
+      label: "Profile Info",
+      completed: [
+        hasText(profile.fullName),
+        hasText(profile.role),
+        hasText(profile.company),
+        hasText(profile.bio),
+        hasText(profile.industry),
+      ].filter(Boolean).length,
+      total: 5,
+    },
+    {
+      label: "Sports & Interests",
+      completed: [
+        hasText(profile.favoriteSports),
+        hasText(profile.businessInterests),
+        Array.isArray(profile.lookingFor) && profile.lookingFor.length > 0,
+      ].filter(Boolean).length,
+      total: 3,
+    },
+    {
+      label: "Contact Info",
+      completed: [hasText(data.user.email), hasText(profile.location)].filter(Boolean).length,
+      total: 2,
+    },
+    {
+      label: "Profile Photo",
+      completed: hasText(profile.avatarUrl) ? 1 : 0,
+      total: 1,
+    },
+    {
+      label: "Cover Photo",
+      completed: hasText(profile.coverImageUrl) ? 1 : 0,
+      total: 1,
+    },
+  ];
+
+  const completedFields = sections.reduce((sum, section) => sum + section.completed, 0);
+  const totalFields = sections.reduce((sum, section) => sum + section.total, 0);
+  const percent = Math.round((completedFields / totalFields) * 100);
+
+  return {
+    percent,
+    completedFields,
+    totalFields,
+    sections,
+  };
+}
+
 const Dashboard = () => {
   const navigate = useNavigate();
   const user = useMemo(() => {
@@ -118,6 +222,15 @@ const Dashboard = () => {
   const [mobileTab, setMobileTab] = useState<MobileTab>("Feed");
   const queryClient = useQueryClient();
   const [searchQuery, setSearchQuery] = useState("");
+  const unreadMessages = useUnreadMessagesCount();
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return window.localStorage.getItem("dashboard-sidebar-collapsed") === "true";
+  });
+
+  useEffect(() => {
+    window.localStorage.setItem("dashboard-sidebar-collapsed", String(sidebarCollapsed));
+  }, [sidebarCollapsed]);
 
   const handleSearchKeys = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter" && searchQuery.trim()) {
@@ -235,6 +348,22 @@ const Dashboard = () => {
     },
   });
 
+  const profileCompletionQuery = useQuery({
+    queryKey: ["me-profile-completion"],
+    queryFn: () => apiFetch<MeProfileResponse>("/api/me"),
+    staleTime: 30_000,
+    retry: (count, err) => {
+      const status = (err as ApiError | undefined)?.status;
+      if (status === 401) return false;
+      return count < 2;
+    },
+  });
+
+  const profileCompletion = useMemo(
+    () => buildProfileCompletion(profileCompletionQuery.data),
+    [profileCompletionQuery.data]
+  );
+
   // Initialize like/save state from API data
   useEffect(() => {
     if (dashboardQuery.data?.feed) {
@@ -309,18 +438,6 @@ const Dashboard = () => {
     navigate("/dashboard");
   };
 
-  const nav = [
-    { label: "Feed", icon: Home, href: "/dashboard" },
-    { label: "Members Network", icon: Users, href: "/members" },
-    { label: "Messages", icon: MessageSquare, href: "/messages" },
-    { label: "Events", icon: CalendarDays, href: "/events" },
-    { label: "Live Matches", icon: MonitorPlay, href: "/matches" },
-    { label: "Business Hub", icon: BriefcaseBusiness, href: "/business" },
-    { label: "Leaderboard", icon: Trophy, href: "/leaderboard" },
-    { label: "Lounge Locations", icon: MapPin, href: "/lounges" },
-    { label: "Saved", icon: Bookmark, href: "/saved" },
-  ];
-
   return (
     <div className="theme-light h-screen bg-background text-foreground flex flex-col overflow-hidden">
       <Header />
@@ -362,17 +479,7 @@ const Dashboard = () => {
                   <div className="rounded-xl border border-border bg-card p-3">
                     <div className="text-xs font-semibold text-muted-foreground px-2 py-2">Menu</div>
                     <div className="space-y-1">
-                      {[
-                        { label: "Feed", icon: Home, href: "/dashboard" },
-                        { label: "Members", icon: Users, href: "/members" },
-                        { label: "Messages", icon: MessageSquare, href: "/messages" },
-                        { label: "Events", icon: CalendarDays, href: "/events" },
-                        { label: "Live Matches", icon: MonitorPlay, href: "/matches" },
-                        { label: "Business Hub", icon: BriefcaseBusiness, href: "/business" },
-                        { label: "Lounges", icon: MapPin, href: "/lounges" },
-                        { label: "Leaderboard", icon: Trophy, href: "/leaderboard" },
-                        { label: "Saved", icon: Bookmark, href: "/saved" },
-                      ].map((item) => {
+                      {memberNav.map((item) => {
                         const Icon = item.icon;
                         return (
                           <button
@@ -381,10 +488,17 @@ const Dashboard = () => {
                               if (item.href === "/dashboard") goToFeed();
                               else navigate(item.href);
                             }}
-                            className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-foreground/90 hover:bg-background hover:text-foreground transition-colors"
+                            className="w-full flex items-center justify-between gap-3 px-3 py-2 rounded-lg text-sm text-foreground/90 hover:bg-background hover:text-foreground transition-colors"
                           >
-                            <Icon className="h-4 w-4 text-muted-foreground" />
-                            <span>{item.label}</span>
+                            <span className="flex items-center gap-3">
+                              <Icon className="h-4 w-4 text-muted-foreground" />
+                              <span>{item.label}</span>
+                            </span>
+                            {item.href === "/messages" && unreadMessages > 0 && (
+                              <span className="inline-flex min-h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white">
+                                {unreadMessages > 99 ? "99+" : unreadMessages}
+                              </span>
+                            )}
                           </button>
                         );
                       })}
@@ -425,8 +539,16 @@ const Dashboard = () => {
                 <Search className="h-4 w-4 text-muted-foreground" />
                 <span className="sr-only">Search</span>
               </button>
-              <button className="h-10 w-10 inline-flex items-center justify-center rounded-lg border border-border bg-background">
+              <button
+                onClick={() => navigate("/messages")}
+                className="relative h-10 w-10 inline-flex items-center justify-center rounded-lg border border-border bg-background"
+              >
                 <MessageSquare className="h-4 w-4 text-muted-foreground" />
+                {unreadMessages > 0 && (
+                  <span className="absolute -right-1.5 -top-1.5 inline-flex min-h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold leading-none text-white">
+                    {unreadMessages > 99 ? "99+" : unreadMessages}
+                  </span>
+                )}
                 <span className="sr-only">Messages</span>
               </button>
             </div>
@@ -464,8 +586,14 @@ const Dashboard = () => {
               <a href="/members" className="text-sm font-medium text-foreground/80 hover:text-foreground">
                 Members
               </a>
-              <a href="/messages" className="text-sm font-medium text-foreground/80 hover:text-foreground">
-                Messages
+              <a href="/messages" className="relative inline-flex items-center gap-2 text-sm font-medium text-foreground/80 hover:text-foreground">
+                <MessageSquare className="h-4 w-4" />
+                <span>Messages</span>
+                {unreadMessages > 0 && (
+                  <span className="inline-flex min-h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold leading-none text-white">
+                    {unreadMessages > 99 ? "99+" : unreadMessages}
+                  </span>
+                )}
               </a>
               <a href={`/profile/${dashboardQuery.data?.me?.username || ""}`} className="text-sm font-medium text-foreground/80 hover:text-foreground">
                 Profile
@@ -478,28 +606,41 @@ const Dashboard = () => {
       {/* 3-column layout */}
       <section className="flex-1 min-h-0 overflow-y-auto lg:overflow-hidden pb-20 md:pb-0">
         <div className="container mx-auto px-6 h-full">
-          <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr_320px] gap-6 lg:h-full lg:min-h-0 py-8">
+          <div className="grid grid-cols-1 gap-6 py-8 transition-all duration-300 lg:grid-cols-[minmax(0,1fr)_320px] lg:h-full lg:min-h-0">
             {/* Left sidebar */}
-            <aside className="hidden lg:block space-y-4 lg:h-full lg:min-h-0 lg:overflow-y-auto lg:overscroll-contain lg:pr-2 lg:no-scrollbar">
-              <div className="rounded-xl border border-border bg-card p-4">
-                <div 
-                  className="flex items-center gap-3 cursor-pointer hover:opacity-80 transition-opacity"
-                  onClick={() => navigate(`/profile/${dashboardQuery.data?.me?.username || name}`)}
-                >
-                  <Avatar
-                    seed={dashboardQuery.data?.me?.username || name}
-                    src={dashboardQuery.data?.me?.avatarUrl}
-                    name={dashboardQuery.data?.me?.fullName || name}
-                    className="h-10 w-10 rounded-full"
-                  />
-                  <div>
-                    <div className="font-semibold text-foreground truncate max-w-[120px]">{name}</div>
-                    <div className="text-xs text-muted-foreground">
-                      {dashboardQuery.data?.me?.membershipTier || "Gold"} Member
-                    </div>
+            <aside className="hidden">
+              <div className="sticky top-6 space-y-4 lg:h-[calc(100vh-11rem)] lg:min-h-0 lg:overflow-y-auto lg:overscroll-contain lg:pr-2 lg:no-scrollbar">
+              <div className={`rounded-xl border border-border bg-card transition-all duration-300 ${sidebarCollapsed ? "p-3" : "p-4"}`}>
+                <div className={`flex ${sidebarCollapsed ? "flex-col items-center gap-3" : "items-start justify-between gap-3"}`}>
+                  <div
+                    className={`cursor-pointer hover:opacity-80 transition-opacity ${sidebarCollapsed ? "flex justify-center" : "flex items-center gap-3"}`}
+                    onClick={() => navigate(`/profile/${dashboardQuery.data?.me?.username || name}`)}
+                    title={name}
+                  >
+                    <Avatar
+                      seed={dashboardQuery.data?.me?.username || name}
+                      src={dashboardQuery.data?.me?.avatarUrl}
+                      name={dashboardQuery.data?.me?.fullName || name}
+                      className="h-10 w-10 rounded-full"
+                    />
+                    {!sidebarCollapsed && (
+                      <div>
+                        <div className="font-semibold text-foreground truncate max-w-[120px]">{name}</div>
+                        <div className="text-xs text-muted-foreground">
+                          {dashboardQuery.data?.me?.membershipTier || "Gold"} Member
+                        </div>
+                      </div>
+                    )}
                   </div>
+                  <button
+                    onClick={() => setSidebarCollapsed((prev) => !prev)}
+                    className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-background text-muted-foreground transition-colors hover:bg-card hover:text-foreground"
+                    title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+                  >
+                    {sidebarCollapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
+                  </button>
                 </div>
-                <div className="grid grid-cols-3 gap-2 mt-4">
+                {!sidebarCollapsed && <div className="grid grid-cols-3 gap-2 mt-4">
                   <div className="rounded-lg border border-border bg-background p-2 text-center">
                     <div className="text-sm font-semibold text-foreground">
                       {dashboardQuery.data?.stats?.connections ?? "—"}
@@ -518,16 +659,19 @@ const Dashboard = () => {
                     </div>
                     <div className="text-[11px] text-muted-foreground">Posts</div>
                   </div>
-                </div>
+                </div>}
               </div>
 
-              <div className="rounded-xl border border-border bg-card p-3">
-                <div className="text-xs font-semibold text-muted-foreground px-2 py-2">
-                  Navigation
-                </div>
+              <div className={`rounded-xl border border-border bg-card transition-all duration-300 ${sidebarCollapsed ? "p-2" : "p-3"}`}>
+                {!sidebarCollapsed && (
+                  <div className="text-xs font-semibold text-muted-foreground px-2 py-2">
+                    Navigation
+                  </div>
+                )}
                 <div className="space-y-1">
-                  {nav.map((item) => {
+                  {memberNav.map((item) => {
                     const Icon = item.icon;
+                    const isMessagesItem = item.href === "/messages";
                     return (
                       <button
                         key={item.label}
@@ -535,40 +679,71 @@ const Dashboard = () => {
                           if (item.href === "/dashboard") goToFeed();
                           else navigate(item.href);
                         }}
-                        className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-foreground/90 hover:bg-background hover:text-foreground transition-colors"
+                        title={item.label}
+                        className={`w-full rounded-lg text-sm text-foreground/90 hover:bg-background hover:text-foreground transition-colors ${
+                          sidebarCollapsed
+                            ? "flex items-center justify-center px-0 py-2.5"
+                            : "flex items-center justify-between gap-3 px-3 py-2"
+                        }`}
                       >
-                        <Icon className="h-4 w-4 text-muted-foreground" />
-                        <span>{item.label}</span>
+                        {sidebarCollapsed ? (
+                          <span className="relative inline-flex">
+                            <Icon className="h-4 w-4 text-muted-foreground" />
+                            {isMessagesItem && unreadMessages > 0 && (
+                              <span className="absolute -right-2.5 -top-2 inline-flex min-h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold leading-none text-white">
+                                {unreadMessages > 99 ? "99+" : unreadMessages}
+                              </span>
+                            )}
+                          </span>
+                        ) : (
+                          <>
+                            <span className="flex items-center gap-3">
+                              <Icon className="h-4 w-4 text-muted-foreground" />
+                              <span>{item.label}</span>
+                            </span>
+                            {isMessagesItem && unreadMessages > 0 && (
+                              <span className="inline-flex min-h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white">
+                                {unreadMessages > 99 ? "99+" : unreadMessages}
+                              </span>
+                            )}
+                          </>
+                        )}
                       </button>
                     );
                   })}
                 </div>
               </div>
 
-              <div className="rounded-xl border border-border bg-card p-3">
-                <div className="text-xs font-semibold text-muted-foreground px-2 py-2">
-                  Lounge Actions
-                </div>
-                <div className="space-y-2 px-2 pb-2">
+              <div className={`rounded-xl border border-border bg-card transition-all duration-300 ${sidebarCollapsed ? "p-2" : "p-3"}`}>
+                {!sidebarCollapsed && (
+                  <div className="text-xs font-semibold text-muted-foreground px-2 py-2">
+                    Lounge Actions
+                  </div>
+                )}
+                <div className={sidebarCollapsed ? "space-y-1" : "space-y-2 px-2 pb-2"}>
                   <button
-                    className="w-full btn-primary text-sm py-2"
+                    className={sidebarCollapsed ? "w-full inline-flex items-center justify-center rounded-lg border border-border bg-background p-2 text-muted-foreground hover:bg-card hover:text-foreground" : "w-full btn-primary text-sm py-2"}
                     onClick={() => navigate("/lounge/book")}
+                    title="Book a Table"
                   >
-                    Book a Table
+                    {sidebarCollapsed ? <CalendarDays className="h-4 w-4" /> : "Book a Table"}
                   </button>
                   <button
-                    className="w-full border border-border rounded-lg text-sm py-2 hover:bg-background transition-colors"
+                    className={sidebarCollapsed ? "w-full inline-flex items-center justify-center rounded-lg border border-border bg-background p-2 text-muted-foreground hover:bg-card hover:text-foreground" : "w-full border border-border rounded-lg text-sm py-2 hover:bg-background transition-colors"}
                     onClick={() => navigate("/lounge/matches")}
+                    title="View Match Schedule"
                   >
-                    View Match Schedule
+                    {sidebarCollapsed ? <MonitorPlay className="h-4 w-4" /> : "View Match Schedule"}
                   </button>
                   <button
-                    className="w-full border border-border rounded-lg text-sm py-2 hover:bg-background transition-colors"
+                    className={sidebarCollapsed ? "w-full inline-flex items-center justify-center rounded-lg border border-border bg-background p-2 text-muted-foreground hover:bg-card hover:text-foreground" : "w-full border border-border rounded-lg text-sm py-2 hover:bg-background transition-colors"}
                     onClick={() => navigate("/lounge/perks")}
+                    title="Member Perks"
                   >
-                    Member Perks
+                    {sidebarCollapsed ? <Trophy className="h-4 w-4" /> : "Member Perks"}
                   </button>
                 </div>
+              </div>
               </div>
             </aside>
 
@@ -617,6 +792,15 @@ const Dashboard = () => {
                   </div>
                 )}
               </div>
+
+              {profileCompletion && profileCompletion.percent < 100 ? (
+                <div className="lg:hidden">
+                  <ProfileCompletionWidget
+                    data={profileCompletion}
+                    onOpenProfile={() => navigate("/profile")}
+                  />
+                </div>
+              ) : null}
 
               {/* Mobile: compact create post */}
               <div className="md:hidden rounded-xl border border-border bg-card p-4">
@@ -963,16 +1147,17 @@ const Dashboard = () => {
                           {(() => {
                             const urlRegex = /(https?:\/\/[^\s]+)/g;
                             const parts = p.content.split(urlRegex);
-                            const matches = p.content.match(urlRegex) || [];
+                            const matches = (p.content.match(urlRegex) || []).map(cleanPostUrl);
                             const firstUrl = matches[0];
                             return (
                               <>
                                 <div>
                                   {parts.map((part, i) => {
                                     if (part.match(urlRegex)) {
+                                      const href = cleanPostUrl(part);
                                       return (
-                                        <a key={i} href={part} target="_blank" rel="noreferrer" className="text-primary hover:underline font-medium">
-                                          {part}
+                                        <a key={i} href={href} target="_blank" rel="noreferrer" className="text-primary hover:underline font-medium">
+                                          {href}
                                         </a>
                                       );
                                     }
@@ -1086,6 +1271,13 @@ const Dashboard = () => {
 
             {/* Right sidebar */}
             <aside className="hidden lg:block space-y-4 lg:h-full lg:min-h-0 lg:overflow-y-auto lg:overscroll-contain lg:no-scrollbar">
+              {profileCompletion && profileCompletion.percent < 100 ? (
+                <ProfileCompletionWidget
+                  data={profileCompletion}
+                  onOpenProfile={() => navigate("/profile")}
+                />
+              ) : null}
+
               <div className="rounded-xl border border-border bg-card p-4">
                 <div className="font-semibold text-foreground mb-3">Upcoming Events</div>
                 <div className="space-y-3">

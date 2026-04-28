@@ -5,7 +5,13 @@ import { fileURLToPath } from "node:url";
 import jwt from "jsonwebtoken";
 import { registerUser, signInUser } from "../api/_lib/auth";
 import { ensureSchema, getPool } from "../api/_lib/db";
+import {
+  createCommentNotification,
+  createNewEventNotifications,
+  createNewPostNotifications,
+} from "../api/_lib/notifications";
 import { getSessionFromAuthHeader } from "../api/_lib/session";
+import { fetchLinkPreview, fetchPreviewImage } from "../api/_lib/linkPreview";
 
 function getJwtSecret() {
   const secret = process.env.JWT_SECRET;
@@ -23,6 +29,34 @@ const __dirname = path.dirname(__filename);
 const app = express();
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "../dist")));
+
+app.get("/api/link-preview", async (req, res) => {
+  try {
+    const url = String(req.query.url || "").trim();
+    if (!url) return res.status(400).json({ error: "URL is required" });
+
+    const preview = await fetchLinkPreview(url);
+    return res.status(200).json({ preview });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unable to fetch preview";
+    return res.status(400).json({ error: message });
+  }
+});
+
+app.get("/api/link-preview-image", async (req, res) => {
+  try {
+    const url = String(req.query.url || "").trim();
+    if (!url) return res.status(400).json({ error: "URL is required" });
+
+    const image = await fetchPreviewImage(url);
+    res.setHeader("Content-Type", image.contentType);
+    res.setHeader("Cache-Control", "public, max-age=86400, stale-while-revalidate=604800");
+    return res.status(200).send(image.body);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unable to fetch image";
+    return res.status(400).json({ error: message });
+  }
+});
 
 app.post("/api/register", async (req, res) => {
   try {
@@ -128,6 +162,76 @@ app.post("/api/checkout", async (req, res) => {
         metadata: { userId: String(session.userId) },
       });
       customerId = customer.id;
+    }
+
+    const existingSubRes = await pool.query(
+      `select plan_type, status, stripe_customer_id, stripe_subscription_id
+       from subscriptions
+       where user_id=$1
+       order by created_at desc
+       limit 1`,
+      [session.userId]
+    );
+    const existingSub = existingSubRes.rows[0];
+    const normalizeSubscriptionStatus = (status: string) =>
+      status === "active" ? "active" : status === "past_due" ? "past_due" : status === "canceled" ? "cancelled" : status;
+
+    if (existingSub?.status === "active" && existingSub?.stripe_subscription_id) {
+      if (existingSub.plan_type === planType) {
+        return res.status(200).json({
+          unchanged: true,
+          message: `Your ${plan.name} is already active.`,
+          planType,
+        });
+      }
+
+      const stripeSubscription = await stripe.subscriptions.retrieve(existingSub.stripe_subscription_id);
+      const itemId = stripeSubscription.items.data[0]?.id;
+      if (!itemId) {
+        throw new Error("Current subscription is missing billable items");
+      }
+
+      const price = await stripe.prices.create({
+        currency: "gbp",
+        unit_amount: plan.price,
+        recurring: { interval: plan.interval },
+        product_data: { name: plan.name, description: plan.description },
+      });
+
+      const updatedSubscription = await stripe.subscriptions.update(existingSub.stripe_subscription_id, {
+        items: [{ id: itemId, price: price.id }],
+        proration_behavior: "create_prorations",
+        metadata: { userId: String(session.userId), planType },
+      });
+
+      await pool.query(
+        `update subscriptions
+         set stripe_customer_id=$1,
+             stripe_subscription_id=$2,
+             plan_type=$3,
+             price_amount=$4,
+             status=$5,
+             current_period_end=$6,
+             updated_at=now()
+         where user_id=$7`,
+        [
+          typeof updatedSubscription.customer === "string" ? updatedSubscription.customer : customerId,
+          updatedSubscription.id,
+          planType,
+          plan.price,
+          normalizeSubscriptionStatus(updatedSubscription.status),
+          updatedSubscription.current_period_end
+            ? new Date(updatedSubscription.current_period_end * 1000).toISOString()
+            : null,
+          session.userId,
+        ]
+      );
+
+      return res.status(200).json({
+        upgraded: true,
+        message: `Membership updated to ${plan.name}.`,
+        planType,
+      });
     }
 
     const origin = req.headers.origin || req.headers.referer?.replace(/\/$/, "") || "http://localhost:5173";
@@ -246,9 +350,18 @@ app.post("/api/webhook", express.raw({ type: "application/json" }), async (req, 
       }
       case "customer.subscription.updated": {
         const sub = event.data.object;
+        const planType = sub.metadata?.planType;
+        const priceMap: Record<string, number> = { individual: 1999, company_small: 2999, company_medium: 3999, company_large: 4999 };
         const status = sub.status === "active" ? "active" : sub.status === "past_due" ? "past_due" : sub.status === "canceled" ? "cancelled" : sub.status;
         const periodEnd = sub.current_period_end ? new Date(sub.current_period_end * 1000).toISOString() : null;
-        await pool.query(`update subscriptions set status=$1, current_period_end=$2, updated_at=now() where stripe_subscription_id=$3`, [status, periodEnd, sub.id]);
+        if (planType && priceMap[planType]) {
+          await pool.query(
+            `update subscriptions set status=$1, current_period_end=$2, plan_type=$3, price_amount=$4, updated_at=now() where stripe_subscription_id=$5`,
+            [status, periodEnd, planType, priceMap[planType], sub.id]
+          );
+        } else {
+          await pool.query(`update subscriptions set status=$1, current_period_end=$2, updated_at=now() where stripe_subscription_id=$3`, [status, periodEnd, sub.id]);
+        }
         break;
       }
       case "customer.subscription.deleted": {
@@ -604,6 +717,15 @@ app.post("/api/events", async (req, res) => {
        returning id, title, starts_at, location, rsvp_count, created_at`,
       [session.userId, title, startsAt.toISOString(), location]
     );
+
+    await createNewEventNotifications(pool, {
+      actorUserId: session.userId,
+      eventId: Number(inserted.rows[0].id),
+      title: inserted.rows[0].title,
+      startsAt: inserted.rows[0].starts_at,
+      location: inserted.rows[0].location,
+    });
+
     return res.status(201).json({ event: inserted.rows[0] });
   } catch (e) {
     const message = e instanceof Error ? e.message : "Unknown error";
@@ -710,6 +832,15 @@ app.post("/api/feed", async (req, res) => {
        returning id, kind, content, like_count, comment_count, created_at, media_url, media_type`,
       [session.userId, kind, content || "", mediaUrl, mediaType]
     );
+
+    await createNewPostNotifications(pool, {
+      actorUserId: session.userId,
+      postId: Number(inserted.rows[0].id),
+      kind,
+      content,
+      hasMedia: Boolean(mediaUrl),
+    });
+
     return res.status(201).json({ post: inserted.rows[0] });
   } catch (e) {
     const message = e instanceof Error ? e.message : "Unknown error";
@@ -1507,6 +1638,120 @@ app.get("/api/messages", async (req, res) => {
   }
 });
 
+app.get("/api/messages-unread-count", async (req, res) => {
+  try {
+    await ensureSchema();
+    const session = getSessionFromAuthHeader(req.header("authorization"));
+    const pool = getPool();
+    const result = await pool.query(
+      `select count(*)::int as unread_count
+       from messages
+       where receiver_id = $1 and read_at is null`,
+      [session.userId]
+    );
+    return res.status(200).json({ unreadCount: result.rows[0]?.unread_count ?? 0 });
+  } catch (e) {
+    const message = e instanceof Error ? e.message : "Unknown error";
+    if (message === "Unauthorized" || message.toLowerCase().includes("jwt")) return res.status(401).json({ error: "Unauthorized" });
+    return res.status(500).json({ error: "Server error", details: message });
+  }
+});
+
+app.get("/api/notifications-unread-count", async (req, res) => {
+  try {
+    await ensureSchema();
+    const session = getSessionFromAuthHeader(req.header("authorization"));
+    const pool = getPool();
+    const result = await pool.query(
+      `select count(*)::int as unread_count
+       from notifications
+       where user_id = $1 and read_at is null`,
+      [session.userId]
+    );
+    return res.status(200).json({ unreadCount: result.rows[0]?.unread_count ?? 0 });
+  } catch (e) {
+    const message = e instanceof Error ? e.message : "Unknown error";
+    if (message === "Unauthorized" || message.toLowerCase().includes("jwt")) return res.status(401).json({ error: "Unauthorized" });
+    return res.status(500).json({ error: "Server error", details: message });
+  }
+});
+
+app.get("/api/notifications", async (req, res) => {
+  try {
+    await ensureSchema();
+    const session = getSessionFromAuthHeader(req.header("authorization"));
+    const pool = getPool();
+    const limitRaw = Number(req.query.limit || 20);
+    const limit = Math.max(1, Math.min(50, Number.isFinite(limitRaw) ? limitRaw : 20));
+
+    const result = await pool.query(
+      `select
+         n.id,
+         n.kind,
+         n.entity_type,
+         n.entity_id,
+         n.title,
+         n.body,
+         n.link,
+         n.read_at,
+         n.created_at,
+         u.username as actor_username,
+         p.full_name as actor_full_name,
+         p.avatar_url as actor_avatar_url
+       from notifications n
+       left join users u on u.id = n.actor_user_id
+       left join profiles p on p.user_id = u.id
+       where n.user_id = $1
+       order by n.created_at desc
+       limit $2`,
+      [session.userId, limit]
+    );
+
+    return res.status(200).json({ notifications: result.rows });
+  } catch (e) {
+    const message = e instanceof Error ? e.message : "Unknown error";
+    if (message === "Unauthorized" || message.toLowerCase().includes("jwt")) return res.status(401).json({ error: "Unauthorized" });
+    return res.status(500).json({ error: "Server error", details: message });
+  }
+});
+
+app.post("/api/notifications", async (req, res) => {
+  try {
+    await ensureSchema();
+    const session = getSessionFromAuthHeader(req.header("authorization"));
+    const pool = getPool();
+    const ids = Array.isArray((req.body as { ids?: unknown[] } | undefined)?.ids)
+      ? ((req.body as { ids?: unknown[] }).ids || [])
+          .map((value) => Number(value))
+          .filter((value) => Number.isFinite(value) && value > 0)
+      : [];
+
+    if (ids.length > 0) {
+      await pool.query(
+        `update notifications
+         set read_at = coalesce(read_at, now())
+         where user_id = $1
+           and id = any($2::bigint[])`,
+        [session.userId, ids]
+      );
+    } else {
+      await pool.query(
+        `update notifications
+         set read_at = coalesce(read_at, now())
+         where user_id = $1
+           and read_at is null`,
+        [session.userId]
+      );
+    }
+
+    return res.status(200).json({ success: true });
+  } catch (e) {
+    const message = e instanceof Error ? e.message : "Unknown error";
+    if (message === "Unauthorized" || message.toLowerCase().includes("jwt")) return res.status(401).json({ error: "Unauthorized" });
+    return res.status(500).json({ error: "Server error", details: message });
+  }
+});
+
 app.get("/api/messages/:userId", async (req, res) => {
   try {
     await ensureSchema();
@@ -1734,12 +1979,21 @@ app.post("/api/feed/:id/comments", async (req, res) => {
     const content = String((req.body as any)?.content || "").trim();
     if (!postId) return res.status(400).json({ error: "Invalid post id" });
     if (!content) return res.status(400).json({ error: "Content required" });
+    const postOwnerRes = await pool.query(`select user_id from posts where id = $1 limit 1`, [postId]);
+    if (!postOwnerRes.rows[0]) return res.status(404).json({ error: "Post not found" });
     const inserted = await pool.query(
       `insert into comments(post_id, user_id, content) values($1,$2,$3)
        returning id, content, created_at, user_id`,
       [postId, session.userId, content]
     );
     await pool.query(`update posts set comment_count = comment_count + 1 where id=$1`, [postId]);
+    await createCommentNotification(pool, {
+      actorUserId: session.userId,
+      commentId: Number(inserted.rows[0].id),
+      postId,
+      postOwnerId: Number(postOwnerRes.rows[0].user_id),
+      content,
+    });
     // Fetch author info
     const userRes = await pool.query(
       `select u.username, p.full_name, p.avatar_url from users u left join profiles p on p.user_id=u.id where u.id=$1`,
