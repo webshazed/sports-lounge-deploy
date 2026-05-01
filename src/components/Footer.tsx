@@ -55,7 +55,7 @@ const Footer = ({ lightText = false }: FooterProps) => {
 
         <div className="mt-12 border-t border-border pt-8 text-center">
           <p className={`text-xs ${bodyClass}`}>
-            © {new Date().getFullYear()} Sports Lounge Global Ltd. All rights reserved.
+            © {new Date().getFullYear()} Sports Lounge is part of Sports Group Ltd
           </p>
         </div>
       </div>

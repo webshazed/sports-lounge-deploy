@@ -115,8 +115,13 @@ export default function MemberLeftRail() {
                     : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
                 }`}
               >
+                {collapsed && (
+                  <span className="pointer-events-none absolute left-[calc(100%+12px)] top-1/2 z-20 hidden -translate-y-1/2 whitespace-nowrap rounded-xl bg-slate-900 px-3 py-2 text-xs font-semibold text-white shadow-xl group-hover:block">
+                    {item.label}
+                  </span>
+                )}
                 <span className="relative inline-flex">
-                  <Icon className={`h-5 w-5 ${isActive ? "text-white" : "text-slate-500 group-hover:text-slate-900"}`} />
+                  <Icon className={`h-5 w-5 ${isActive ? "text-white" : "text-black group-hover:text-black"}`} />
                   {isMessagesItem && unreadMessages > 0 && (
                     <span className="absolute -right-2.5 -top-2 inline-flex min-h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold leading-none text-white">
                       {unreadMessages > 99 ? "99+" : unreadMessages}
@@ -136,11 +141,16 @@ export default function MemberLeftRail() {
         <button
           type="button"
           onClick={() => navigate(authUser?.username ? `/profile/${authUser.username}` : "/profile")}
-          className={`flex w-full items-center rounded-2xl transition-all duration-200 ease-out hover:bg-slate-50 ${
+          className={`group relative flex w-full items-center rounded-2xl transition-all duration-200 ease-out hover:bg-slate-50 ${
             collapsed ? "justify-center px-0 py-3" : "gap-3 px-3 py-3"
           }`}
           title="Profile"
         >
+          {collapsed && (
+            <span className="pointer-events-none absolute left-[calc(100%+12px)] top-1/2 z-20 hidden -translate-y-1/2 whitespace-nowrap rounded-xl bg-slate-900 px-3 py-2 text-xs font-semibold text-white shadow-xl group-hover:block">
+              Profile
+            </span>
+          )}
           {authUser?.username ? (
             <Avatar
               seed={authUser.username}

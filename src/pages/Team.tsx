@@ -23,15 +23,6 @@ const team: TeamMember[] = [
     ],
   },
   {
-    name: "Anthony Richardson",
-    image: "/Anthony Richardson.png",
-    bio: [
-      "Anthony, a seasoned veteran in the world of building, construction and finance. For three decades, he has immersed himself in projects spanning across the United Kingdom, France, and the UAE.",
-      "With his extensive experience, he brings a wealth of knowledge and expertise to the table. Anthony heads the financial firm Wealth Bridge Management based in Dubai.",
-    ],
-    links: [{ label: "WealthBridgeManagement.com", href: "https://www.wealthbridgemanagement.com" }],
-  },
-  {
     name: "Julie Tooby",
     image: "/Julie Tooby.jpg",
     bio: [
